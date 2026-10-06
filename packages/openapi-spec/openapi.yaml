@@ -1,0 +1,211 @@
+openapi: 3.0.3
+info:
+  title: NetPoint AI API
+  description: API REST para el procesado de partidos de tenis, extracción de telemetría y consulta táctica multi-agente.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Servidor Local de Desarrollo
+
+paths:
+  /matches/process:
+    post:
+      summary: Iniciar procesamiento de partido (YouTube o Vídeo Local)
+      description: Recibe la URL de un vídeo de YouTube o la ruta de un archivo para iniciar la ingesta y el tracking con visión por computador de forma asíncrona.
+      operationId: processMatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessMatchRequest'
+      responses:
+        '202':
+          description: Procesamiento aceptado e iniciado en segundo plano.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessMatchResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+
+  /matches/{matchId}/status:
+    get:
+      summary: Consultar estado del procesamiento
+      operationId: getMatchStatus
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Estado actual de la tarea.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchStatusResponse'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+
+  /matches/{matchId}/telemetry:
+    get:
+      summary: Obtener telemetría táctica y coordenadas para el Overlay
+      description: Devuelve las coordenadas 2D de la pista, trayectorias de la bola, botes (In/Out), velocidad y mapas de calor.
+      operationId: getMatchTelemetry
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Datos de telemetría devueltos correctamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchTelemetryResponse'
+
+  /matches/{matchId}/chat:
+    post:
+      summary: Consulta conversacional al sistema Multi-Agente
+      description: Envía preguntas en lenguaje natural sobre el partido al pool de agentes (Táctico, Biomecánico, Estratégico).
+      operationId: queryAgentChat
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatQueryRequest'
+      responses:
+        '200':
+          description: Respuesta generada por los agentes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatQueryResponse'
+
+components:
+  schemas:
+    ProcessMatchRequest:
+      type: object
+      required:
+        - sourceUrl
+      properties:
+        sourceUrl:
+          type: string
+          example: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        title:
+          type: string
+          example: "Final Alcaraz vs Sinner - Set 1"
+
+    ProcessMatchResponse:
+      type: object
+      properties:
+        matchId:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        status:
+          type: string
+          enum: [queued, processing]
+          example: "processing"
+        message:
+          type: string
+          example: "Procesamiento de vídeo iniciado en segundo plano."
+
+    MatchStatusResponse:
+      type: object
+      properties:
+        matchId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+          example: "completed"
+        progressPercentage:
+          type: integer
+          example: 100
+
+    MatchTelemetryResponse:
+      type: object
+      properties:
+        matchId:
+          type: string
+          format: uuid
+        totalRallies:
+          type: integer
+          example: 18
+        shots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShotTelemetry'
+
+    ShotTelemetry:
+      type: object
+      properties:
+        shotNumber:
+          type: integer
+          example: 4
+        timestamp:
+          type: number
+          example: 12.45
+        player:
+          type: string
+          enum: [player1, player2]
+        speedKmH:
+          type: number
+          example: 142.5
+        bounceCoordinates:
+          type: object
+          properties:
+            x:
+              type: number
+              example: 4.12
+            y:
+              type: number
+              example: 11.80
+        isInside:
+          type: boolean
+          example: true
+
+    ChatQueryRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          example: "¿Por qué estoy perdiendo puntos cuando juego cruzado desde el fondo?"
+
+    ChatQueryResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+          example: "Has realizado 14 tiros cruzados. En un 65% de los casos la bola cayó corta..."
+        agentRole:
+          type: string
+          example: "Agente Táctico"
+        recommendations:
+          type: array
+          items:
+            type: string
+
+  responses:
+    400BadRequest:
+      description: Solicitud incorrecta o parámetros faltantes.
+    404NotFound:
+      description: El recurso solicitado no existe.
