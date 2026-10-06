@@ -1,0 +1,67 @@
+.app-shell {
+  background-image:
+    radial-gradient(circle at top left, rgba(163, 230, 53, 0.18), transparent 26%),
+    radial-gradient(circle at top right, rgba(34, 197, 94, 0.1), transparent 22%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 20%);
+}
+
+.panel-surface {
+  background:
+    linear-gradient(180deg, rgba(25, 25, 25, 0.95), rgba(12, 12, 12, 0.92)),
+    rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(18px);
+}
+
+.court-frame {
+  fill: rgba(12, 12, 12, 0.9);
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 12;
+}
+
+.court-surface {
+  fill: rgba(23, 23, 23, 0.96);
+  stroke: rgba(163, 230, 53, 0.22);
+  stroke-width: 6;
+}
+
+.court-line {
+  stroke: rgba(255, 255, 255, 0.82);
+  stroke-width: 8;
+}
+
+.court-line--soft {
+  opacity: 0.68;
+}
+
+.shot-ring {
+  opacity: 0.26;
+}
+
+.shot-ring--inside {
+  fill: rgb(163 230 53);
+}
+
+.shot-ring--outside {
+  fill: rgb(251 113 133);
+}
+
+.shot-core--inside {
+  fill: rgb(190 242 100);
+}
+
+.shot-core--outside {
+  fill: rgb(253 164 175);
+}
+
+.shot-label {
+  fill: rgb(9 9 11);
+  font-size: 36px;
+  font-weight: 700;
+}
+
+.court-placeholder {
+  background-image:
+    linear-gradient(transparent 49%, rgba(255, 255, 255, 0.04) 50%, transparent 51%),
+    linear-gradient(90deg, transparent 49%, rgba(255, 255, 255, 0.04) 50%, transparent 51%);
+  background-size: 42px 42px;
+}

@@ -69,6 +69,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MatchTelemetryResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '404':
+          $ref: '#/components/responses/404NotFound'
 
   /matches/{matchId}/chat:
     post:
@@ -100,11 +104,14 @@ components:
   schemas:
     ProcessMatchRequest:
       type: object
+      additionalProperties: false
       required:
         - sourceUrl
       properties:
         sourceUrl:
           type: string
+          format: uri
+          minLength: 1
           example: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         title:
           type: string
@@ -112,6 +119,11 @@ components:
 
     ProcessMatchResponse:
       type: object
+      additionalProperties: false
+      required:
+        - matchId
+        - status
+        - message
       properties:
         matchId:
           type: string
@@ -119,7 +131,7 @@ components:
           example: "123e4567-e89b-12d3-a456-426614174000"
         status:
           type: string
-          enum: [queued, processing]
+          enum: [processing]
           example: "processing"
         message:
           type: string
@@ -141,6 +153,11 @@ components:
 
     MatchTelemetryResponse:
       type: object
+      additionalProperties: false
+      required:
+        - matchId
+        - totalRallies
+        - shots
       properties:
         matchId:
           type: string
@@ -155,6 +172,14 @@ components:
 
     ShotTelemetry:
       type: object
+      additionalProperties: false
+      required:
+        - shotNumber
+        - timestamp
+        - player
+        - speedKmH
+        - bounceCoordinates
+        - isInside
       properties:
         shotNumber:
           type: integer
@@ -170,6 +195,10 @@ components:
           example: 142.5
         bounceCoordinates:
           type: object
+          additionalProperties: false
+          required:
+            - x
+            - y
           properties:
             x:
               type: number
