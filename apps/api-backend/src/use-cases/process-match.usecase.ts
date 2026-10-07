@@ -1,67 +1,38 @@
 import { randomUUID } from 'node:crypto';
 
 import type {
+  FrameTelemetry,
   MatchProcessRequest,
   MatchProcessResponse,
   MatchRegistry,
-  MatchTelemetryResponse,
-  ShotTelemetry,
 } from '../domain/match.entity.js';
 
-const COURT_BOUNDS = {
-  minX: 0,
-  maxX: 8.23,
-  minY: 0,
-  maxY: 23.77,
-} as const;
+const VISION_SERVICE_URL = 'http://localhost:8000/process-video';
 
-const SHOT_BLUEPRINTS = [
-  { timestamp: 1.24, player: 'player1', speedKmH: 131.2, x: 2.14, y: 6.8 },
-  { timestamp: 2.91, player: 'player2', speedKmH: 118.7, x: 6.02, y: 16.45 },
-  { timestamp: 4.3, player: 'player1', speedKmH: 143.6, x: 8.91, y: 18.2 },
-  { timestamp: 6.12, player: 'player2', speedKmH: 124.9, x: 3.72, y: 12.3 },
-  { timestamp: 7.86, player: 'player1', speedKmH: 136.4, x: -0.32, y: 9.14 },
-  { timestamp: 9.42, player: 'player2', speedKmH: 129.1, x: 5.44, y: 21.1 },
-  { timestamp: 11.07, player: 'player1', speedKmH: 147.3, x: 7.89, y: 24.42 },
-  { timestamp: 12.68, player: 'player2', speedKmH: 122.5, x: 1.84, y: 14.88 },
-] as const;
+interface VisionServiceResponse {
+  telemetry: FrameTelemetry[];
+}
 
-export function isBounceInsideCourt(x: number, y: number): boolean {
+export class VisionServiceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VisionServiceError';
+  }
+}
+
+function isVisionServiceResponse(value: unknown): value is VisionServiceResponse {
   return (
-    x >= COURT_BOUNDS.minX &&
-    x <= COURT_BOUNDS.maxX &&
-    y >= COURT_BOUNDS.minY &&
-    y <= COURT_BOUNDS.maxY
+    typeof value === 'object' &&
+    value !== null &&
+    'telemetry' in value &&
+    Array.isArray(value.telemetry)
   );
-}
-
-function buildMockShots(): ShotTelemetry[] {
-  return SHOT_BLUEPRINTS.map((shot, index) => ({
-    shotNumber: index + 1,
-    timestamp: shot.timestamp,
-    player: shot.player,
-    speedKmH: shot.speedKmH,
-    bounceCoordinates: {
-      x: shot.x,
-      y: shot.y,
-    },
-    isInside: isBounceInsideCourt(shot.x, shot.y),
-  }));
-}
-
-function buildMockTelemetry(matchId: string): MatchTelemetryResponse {
-  const shots = buildMockShots();
-
-  return {
-    matchId,
-    totalRallies: Math.ceil(shots.length / 2),
-    shots,
-  };
 }
 
 export interface ProcessMatchDependencies {
   matchRegistry: MatchRegistry;
   generateMatchId?: () => string;
+  fetchImpl?: typeof fetch;
 }
 
 export class ProcessMatchUseCase {
@@ -69,28 +40,66 @@ export class ProcessMatchUseCase {
 
   private readonly generateMatchId: () => string;
 
-  constructor({ matchRegistry, generateMatchId = randomUUID }: ProcessMatchDependencies) {
+  private readonly fetchImpl: typeof fetch;
+
+  constructor({
+    matchRegistry,
+    generateMatchId = randomUUID,
+    fetchImpl = fetch,
+  }: ProcessMatchDependencies) {
     this.matchRegistry = matchRegistry;
     this.generateMatchId = generateMatchId;
+    this.fetchImpl = fetchImpl;
   }
 
-  execute(request: MatchProcessRequest): MatchProcessResponse {
+  async execute(request: MatchProcessRequest): Promise<MatchProcessResponse> {
     const matchId = this.generateMatchId();
-    const telemetry = buildMockTelemetry(matchId);
+    let response: Response;
+
+    try {
+      response = await this.fetchImpl(VISION_SERVICE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ youtubeUrl: request.sourceUrl, matchId }),
+      });
+    } catch {
+      throw new VisionServiceError('Could not connect to the Python vision service.');
+    }
+
+    if (!response.ok) {
+      throw new VisionServiceError(
+        `The Python vision service returned status ${response.status}.`,
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new VisionServiceError('The Python vision service returned invalid JSON.');
+    }
+
+    if (!isVisionServiceResponse(payload)) {
+      throw new VisionServiceError('The Python vision service returned invalid telemetry.');
+    }
+
+    const telemetry = {
+      matchId,
+      telemetry: payload.telemetry,
+    };
 
     this.matchRegistry.save({
       matchId,
       sourceUrl: request.sourceUrl,
       title: request.title,
-      status: 'processing',
+      status: 'completed',
       telemetry,
       createdAt: new Date().toISOString(),
     });
 
     return {
-      matchId,
-      status: 'processing',
-      message: 'Mock telemetry generated. Processing has started.',
+      ...telemetry,
+      status: 'completed',
     };
   }
 }

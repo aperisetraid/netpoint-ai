@@ -16,6 +16,7 @@ import { ProcessMatchUseCase } from '../use-cases/process-match.usecase.js';
 export interface BuildAppOptions {
   logger?: boolean;
   matchRegistry?: MatchRegistry;
+  fetchImpl?: typeof fetch;
 }
 
 type OpenApiDocument = Extract<FastifyStaticSwaggerOptions['specification'], { document: unknown }>['document'];
@@ -40,7 +41,10 @@ async function registerSwaggerUi(app: FastifyInstance): Promise<void> {
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false });
   const matchRegistry = options.matchRegistry ?? new InMemoryMatchRegistry();
-  const processMatchUseCase = new ProcessMatchUseCase({ matchRegistry });
+  const processMatchUseCase = new ProcessMatchUseCase({
+    matchRegistry,
+    fetchImpl: options.fetchImpl,
+  });
   const getTelemetryUseCase = new GetTelemetryUseCase(matchRegistry);
 
   await app.register(cors, { origin: true });

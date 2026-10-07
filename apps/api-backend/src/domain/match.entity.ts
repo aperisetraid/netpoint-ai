@@ -9,28 +9,27 @@ export interface MatchProcessRequest {
 
 export interface MatchProcessResponse {
   matchId: string;
-  status: 'processing';
-  message: string;
+  status: 'completed';
+  telemetry: FrameTelemetry[];
 }
 
-export interface BounceCoordinates {
-  x: number;
-  y: number;
+export interface DetectionTelemetry {
+  class: 'player' | 'ball';
+  confidence: number;
+  bbox: [number, number, number, number];
+  x_meters: number | null;
+  y_meters: number | null;
 }
 
-export interface ShotTelemetry {
-  shotNumber: number;
-  timestamp: number;
-  player: MatchPlayer;
-  speedKmH: number;
-  bounceCoordinates: BounceCoordinates;
-  isInside: boolean;
+export interface FrameTelemetry {
+  frame_index: number;
+  timestamp_seconds: number;
+  detections: DetectionTelemetry[];
 }
 
 export interface MatchTelemetryResponse {
   matchId: string;
-  totalRallies: number;
-  shots: ShotTelemetry[];
+  telemetry: FrameTelemetry[];
 }
 
 export interface MatchRecord {

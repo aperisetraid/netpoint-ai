@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from downloader import download_youtube_video
 from tracker import TennisTracker
 
@@ -6,7 +9,14 @@ def run_pipeline(youtube_url: str):
     video_file = download_youtube_video(youtube_url)
     
     tracker = TennisTracker(model_size="yolov8n.pt")
-    tracker.process_video(video_file, max_frames=150)
+    telemetry = tracker.process_video(video_file, max_frames=150)
+
+    output_path = Path("./temp/telemetry_output.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as output_file:
+        json.dump(telemetry, output_file, indent=2)
+    print(f"📄 Telemetría guardada en: {output_path}")
+    return telemetry
 
 if __name__ == "__main__":
     # URL de prueba (vídeo de punto corto)

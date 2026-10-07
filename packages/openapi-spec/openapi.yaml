@@ -10,8 +10,8 @@ servers:
 paths:
   /matches/process:
     post:
-      summary: Iniciar procesamiento de partido (YouTube o Vídeo Local)
-      description: Recibe la URL de un vídeo de YouTube o la ruta de un archivo para iniciar la ingesta y el tracking con visión por computador de forma asíncrona.
+      summary: Procesar un partido y devolver telemetría
+      description: Envía la URL del vídeo al servicio de visión y devuelve la telemetría detectada por fotograma.
       operationId: processMatch
       requestBody:
         required: true
@@ -20,14 +20,16 @@ paths:
             schema:
               $ref: '#/components/schemas/ProcessMatchRequest'
       responses:
-        '202':
-          description: Procesamiento aceptado e iniciado en segundo plano.
+        '200':
+          description: Procesamiento completado y telemetría devuelta.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProcessMatchResponse'
         '400':
           $ref: '#/components/responses/400BadRequest'
+        '502':
+          description: El servicio de visión no pudo procesar el vídeo.
 
   /matches/{matchId}/status:
     get:
@@ -123,7 +125,7 @@ components:
       required:
         - matchId
         - status
-        - message
+        - telemetry
       properties:
         matchId:
           type: string
@@ -131,97 +133,104 @@ components:
           example: "123e4567-e89b-12d3-a456-426614174000"
         status:
           type: string
-          enum: [processing]
-          example: "processing"
-        message:
-          type: string
-          example: "Procesamiento de vídeo iniciado en segundo plano."
+          enum: [completed]
+          example: "completed"
+        telemetry:
+          type: array
+          items:
+            $ref: '#/components/schemas/FrameTelemetry'
 
     MatchStatusResponse:
       type: object
       properties:
         matchId:
-          type: string
-          format: uuid
-        status:
-          type: string
-          enum: [queued, processing, completed, failed]
-          example: "completed"
-        progressPercentage:
-          type: integer
-          example: 100
+          MatchStatusResponse:
+            type: object
+            properties:
+              matchId:
+                type: string
+                format: uuid
+              status:
+                type: string
+                enum: [queued, processing, completed, failed]
+                example: "completed"
+              progressPercentage:
+                type: integer
+                example: 100
 
-    MatchTelemetryResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - matchId
-        - totalRallies
-        - shots
-      properties:
-        matchId:
-          type: string
-          format: uuid
-        totalRallies:
-          type: integer
-          example: 18
-        shots:
-          type: array
-          items:
-            $ref: '#/components/schemas/ShotTelemetry'
+          MatchTelemetryResponse:
+            type: object
+            additionalProperties: false
+            required:
+              - matchId
+              - telemetry
+            properties:
+              matchId:
+                type: string
+                format: uuid
+              telemetry:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FrameTelemetry'
 
-    ShotTelemetry:
-      type: object
-      additionalProperties: false
-      required:
-        - shotNumber
-        - timestamp
-        - player
-        - speedKmH
-        - bounceCoordinates
-        - isInside
-      properties:
-        shotNumber:
-          type: integer
-          example: 4
-        timestamp:
-          type: number
-          example: 12.45
-        player:
-          type: string
-          enum: [player1, player2]
-        speedKmH:
-          type: number
-          example: 142.5
-        bounceCoordinates:
-          type: object
-          additionalProperties: false
-          required:
-            - x
-            - y
-          properties:
-            x:
-              type: number
-              example: 4.12
-            y:
-              type: number
-              example: 11.80
-        isInside:
-          type: boolean
-          example: true
+          FrameTelemetry:
+            type: object
+            additionalProperties: false
+            required:
+              - frame_index
+              - timestamp_seconds
+              - detections
+            properties:
+              frame_index:
+                type: integer
+                example: 0
+              timestamp_seconds:
+                type: number
+                example: 0.04
+              detections:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DetectionTelemetry'
 
-    ChatQueryRequest:
-      type: object
-      required:
-        - prompt
-      properties:
-        prompt:
-          type: string
-          example: "¿Por qué estoy perdiendo puntos cuando juego cruzado desde el fondo?"
+          DetectionTelemetry:
+            type: object
+            additionalProperties: false
+            required:
+              - class
+              - confidence
+              - bbox
+              - x_meters
+              - y_meters
+            properties:
+              class:
+                type: string
+                enum: [player, ball]
+              confidence:
+                type: number
+                example: 0.97
+              bbox:
+                type: array
+                minItems: 4
+                maxItems: 4
+                items:
+                  type: number
+              x_meters:
+                type: number
+                nullable: true
+                example: 1.2
+              y_meters:
+                type: number
+                nullable: true
+                example: 4.5
 
-    ChatQueryResponse:
-      type: object
-      properties:
+          ChatQueryRequest:
+            type: object
+            required:
+              - prompt
+            properties:
+              prompt:
+                type: string
+                example: "¿Por qué estoy perdiendo puntos cuando juego cruzado desde el fondo?"
         answer:
           type: string
           example: "Has realizado 14 tiros cruzados. En un 65% de los casos la bola cayó corta..."

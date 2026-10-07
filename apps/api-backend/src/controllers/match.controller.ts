@@ -2,7 +2,52 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import type { MatchProcessRequest } from '../domain/match.entity.js';
 import { MatchNotFoundError, GetTelemetryUseCase } from '../use-cases/get-telemetry.usecase.js';
-import { ProcessMatchUseCase } from '../use-cases/process-match.usecase.js';
+import { ProcessMatchUseCase, VisionServiceError } from '../use-cases/process-match.usecase.js';
+
+const DETECTION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['class', 'confidence', 'bbox', 'x_meters', 'y_meters'],
+  properties: {
+    class: { type: 'string', enum: ['player', 'ball'] },
+    confidence: { type: 'number' },
+    bbox: {
+      type: 'array',
+      minItems: 4,
+      maxItems: 4,
+      items: { type: 'number' },
+    },
+    x_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+    y_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+} as const;
+
+const FRAME_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['frame_index', 'timestamp_seconds', 'detections'],
+  properties: {
+    frame_index: { type: 'integer' },
+    timestamp_seconds: { type: 'number' },
+    detections: {
+      type: 'array',
+      items: DETECTION_SCHEMA,
+    },
+  },
+} as const;
+
+const TELEMETRY_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['matchId', 'telemetry'],
+  properties: {
+    matchId: { type: 'string' },
+    telemetry: {
+      type: 'array',
+      items: FRAME_SCHEMA,
+    },
+  },
+} as const;
 
 const PROCESS_MATCH_SCHEMA = {
   body: {
@@ -15,13 +60,24 @@ const PROCESS_MATCH_SCHEMA = {
     },
   },
   response: {
-    202: {
+    200: {
       type: 'object',
       additionalProperties: false,
-      required: ['matchId', 'status', 'message'],
+      required: ['matchId', 'status', 'telemetry'],
       properties: {
         matchId: { type: 'string' },
-        status: { type: 'string', enum: ['processing'] },
+        status: { type: 'string', enum: ['completed'] },
+        telemetry: {
+          type: 'array',
+          items: FRAME_SCHEMA,
+        },
+      },
+    },
+    502: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['message'],
+      properties: {
         message: { type: 'string' },
       },
     },
@@ -38,46 +94,7 @@ const MATCH_TELEMETRY_SCHEMA = {
     },
   },
   response: {
-    200: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['matchId', 'totalRallies', 'shots'],
-      properties: {
-        matchId: { type: 'string' },
-        totalRallies: { type: 'integer' },
-        shots: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: [
-              'shotNumber',
-              'timestamp',
-              'player',
-              'speedKmH',
-              'bounceCoordinates',
-              'isInside',
-            ],
-            properties: {
-              shotNumber: { type: 'integer' },
-              timestamp: { type: 'number' },
-              player: { type: 'string', enum: ['player1', 'player2'] },
-              speedKmH: { type: 'number' },
-              bounceCoordinates: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['x', 'y'],
-                properties: {
-                  x: { type: 'number' },
-                  y: { type: 'number' },
-                },
-              },
-              isInside: { type: 'boolean' },
-            },
-          },
-        },
-      },
-    },
+    200: TELEMETRY_RESPONSE_SCHEMA,
   },
 } as const;
 
@@ -119,8 +136,17 @@ export class MatchController {
       return;
     }
 
-    const response = this.dependencies.processMatchUseCase.execute(request.body);
-    await reply.status(202).send(response);
+    try {
+      const response = await this.dependencies.processMatchUseCase.execute(request.body);
+      await reply.status(200).send(response);
+    } catch (error) {
+      if (error instanceof VisionServiceError) {
+        await reply.status(502).send({ message: error.message });
+        return;
+      }
+
+      throw error;
+    }
   }
 
   async getTelemetry(

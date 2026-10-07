@@ -3,13 +3,50 @@ import test from 'node:test';
 
 import { buildApp } from './server.js';
 
-const app = await buildApp();
+const pythonTelemetry = [
+  {
+    frame_index: 0,
+    timestamp_seconds: 0,
+    detections: [
+      {
+        class: 'player',
+        confidence: 0.97,
+        bbox: [10, 20, 30, 40],
+        x_meters: 1.2,
+        y_meters: 4.5,
+      },
+      {
+        class: 'ball',
+        confidence: 0.82,
+        bbox: [40, 50, 46, 56],
+        x_meters: null,
+        y_meters: null,
+      },
+    ],
+  },
+];
+
+const pythonRequests: Array<{ url: string; payload: { youtubeUrl: string; matchId: string } }> = [];
+
+const app = await buildApp({
+  fetchImpl: async (input, init) => {
+    const payload = JSON.parse(String(init?.body)) as {
+      youtubeUrl: string;
+      matchId: string;
+    };
+    pythonRequests.push({ url: String(input), payload });
+
+    return new Response(JSON.stringify({ matchId: payload.matchId, telemetry: pythonTelemetry }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  },
+});
 
 test.after(async () => {
   await app.close();
 });
 
-test('POST /api/v1/matches/process returns unique match IDs and processing status', async () => {
+test('POST /api/v1/matches/process forwards the video and returns Python telemetry', async () => {
   const payload = {
     sourceUrl: 'https://example.com/matches/final.mp4',
     title: 'Final ATP - Set 1',
@@ -26,8 +63,8 @@ test('POST /api/v1/matches/process returns unique match IDs and processing statu
     payload,
   });
 
-  assert.equal(firstResponse.statusCode, 202);
-  assert.equal(secondResponse.statusCode, 202);
+  assert.equal(firstResponse.statusCode, 200);
+  assert.equal(secondResponse.statusCode, 200);
 
   const firstBody = firstResponse.json();
   const secondBody = secondResponse.json();
@@ -35,10 +72,21 @@ test('POST /api/v1/matches/process returns unique match IDs and processing statu
   assert.match(firstBody.matchId, /^[0-9a-f-]{36}$/i);
   assert.match(secondBody.matchId, /^[0-9a-f-]{36}$/i);
   assert.notEqual(firstBody.matchId, secondBody.matchId);
-  assert.equal(firstBody.status, 'processing');
+  assert.equal(firstBody.status, 'completed');
+  assert.deepEqual(firstBody.telemetry, pythonTelemetry);
+  assert.deepEqual(pythonRequests.slice(0, 2), [
+    {
+      url: 'http://localhost:8000/process-video',
+      payload: { youtubeUrl: payload.sourceUrl, matchId: firstBody.matchId },
+    },
+    {
+      url: 'http://localhost:8000/process-video',
+      payload: { youtubeUrl: payload.sourceUrl, matchId: secondBody.matchId },
+    },
+  ]);
 });
 
-test('GET /api/v1/matches/:matchId/telemetry returns mock telemetry with consistent inside flags', async () => {
+test('GET /api/v1/matches/:matchId/telemetry returns the Python telemetry saved for the match', async () => {
   const processResponse = await app.inject({
     method: 'POST',
     url: '/api/v1/matches/process',
@@ -57,18 +105,28 @@ test('GET /api/v1/matches/:matchId/telemetry returns mock telemetry with consist
 
   const telemetryBody = telemetryResponse.json();
   assert.equal(telemetryBody.matchId, matchId);
-  assert.equal(telemetryBody.totalRallies, 4);
-  assert.equal(telemetryBody.shots.length, 8);
+  assert.deepEqual(telemetryBody, {
+    matchId,
+    telemetry: pythonTelemetry,
+  });
+});
 
-  for (const shot of telemetryBody.shots) {
-    const insideByCoordinates =
-      shot.bounceCoordinates.x >= 0 &&
-      shot.bounceCoordinates.x <= 8.23 &&
-      shot.bounceCoordinates.y >= 0 &&
-      shot.bounceCoordinates.y <= 23.77;
+test('POST /api/v1/matches/process returns 502 when the Python service fails', async () => {
+  const failingApp = await buildApp({
+    fetchImpl: async () => new Response('service unavailable', { status: 503 }),
+  });
 
-    assert.equal(shot.isInside, insideByCoordinates);
-    assert.match(shot.player, /^player[12]$/);
+  try {
+    const response = await failingApp.inject({
+      method: 'POST',
+      url: '/api/v1/matches/process',
+      payload: { sourceUrl: 'https://example.com/matches/final.mp4' },
+    });
+
+    assert.equal(response.statusCode, 502);
+    assert.match(response.json().message, /status 503/);
+  } finally {
+    await failingApp.close();
   }
 });
 
