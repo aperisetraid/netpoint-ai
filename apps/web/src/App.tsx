@@ -173,8 +173,8 @@ function App() {
                 Panel operativo para procesar partidos y revisar botes en segundos.
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-white/70 sm:text-base">
-                Ingresá una URL válida, dispará el procesamiento y revisá velocidad, porcentaje
-                dentro y distribución de tiros sobre una pista simulada.
+                Ingresa una URL válida, dispara el procesamiento y revisa velocidad, porcentaje
+                dentro y la distribución de tiros sobre una pista simulada.
               </p>
             </div>
           </div>
@@ -333,7 +333,7 @@ function App() {
 
               {!analysis && !isSubmitting && !errorMessage ? (
                 <div className="mt-5 rounded-3xl border border-dashed border-white/10 bg-white/4 p-5 text-sm text-white/55">
-                  Cargá una URL y ejecutá el análisis para ver el resumen táctico del partido.
+                  Carga una URL y ejecuta el análisis para ver el resumen táctico del partido.
                 </div>
               ) : null}
 
@@ -463,7 +463,7 @@ function App() {
                     <div>
                       <p className="text-lg font-semibold text-white">{analysis?.title ?? 'Esperando análisis'}</p>
                       <p className="mt-2 break-all text-sm text-white/58">
-                        {analysis?.sourceUrl ?? 'Ingresá una fuente para iniciar el pipeline local.'}
+                        {analysis?.sourceUrl ?? 'Ingresa una fuente para iniciar el pipeline local.'}
                       </p>
                     </div>
                   </div>
