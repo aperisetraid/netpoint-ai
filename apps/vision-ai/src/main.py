@@ -4,12 +4,12 @@ from pathlib import Path
 from downloader import download_youtube_video
 from tracker import TennisTracker
 
-def run_pipeline(youtube_url: str):
+def run_pipeline(youtube_url: str, max_frames: int | None = None):
     print("--- INICIANDO PIPELINE DE VISION AI ---")
     video_file = download_youtube_video(youtube_url)
     
     tracker = TennisTracker(model_size="yolov8n.pt")
-    telemetry = tracker.process_video(video_file, max_frames=150)
+    telemetry = tracker.process_video(video_file, max_frames=max_frames)
 
     output_path = Path("./temp/telemetry_output.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)

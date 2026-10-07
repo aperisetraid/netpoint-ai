@@ -2,6 +2,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 import cv2
+import numpy as np
 
 
 Point = Tuple[int, int]
@@ -99,8 +100,8 @@ class CourtDetector:
     @staticmethod
     def _segments(detected_lines) -> List[Segment]:
         segments = []
-        for detected_line in detected_lines:
-            x1, y1, x2, y2 = (int(value) for value in detected_line[0])
+        for detected_line in np.asarray(detected_lines).reshape(-1, 4):
+            x1, y1, x2, y2 = (int(value) for value in detected_line)
             length = math.hypot(x2 - x1, y2 - y1)
             if length == 0:
                 continue

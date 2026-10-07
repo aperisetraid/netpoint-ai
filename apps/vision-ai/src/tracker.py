@@ -13,7 +13,7 @@ class TennisTracker:
         # Clases de COCO: 0 = persona (jugadores), 32 = pelota de tenis
         self.target_classes = [0, 32]
 
-    def process_video(self, video_path: str, max_frames: int = 150):
+    def process_video(self, video_path: str, max_frames: int | None = None):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise FileNotFoundError(f"No se pudo abrir el vídeo: {video_path}")
@@ -24,7 +24,7 @@ class TennisTracker:
         homography_matrix = None
         print("🚀 Iniciando inferencia con YOLOv8...")
 
-        while cap.isOpened() and frame_count < max_frames:
+        while cap.isOpened() and (max_frames is None or frame_count < max_frames):
             ret, frame = cap.read()
             if not ret:
                 break
@@ -77,7 +77,8 @@ class TennisTracker:
             frame_count += 1
 
             if frame_count % 30 == 0:
-                print(f"Fotogramas procesados: {frame_count}/{max_frames}")
+                frame_limit = f"/{max_frames}" if max_frames is not None else ""
+                print(f"Fotogramas procesados: {frame_count}{frame_limit}")
 
         cap.release()
         cv2.destroyAllWindows()
