@@ -5,6 +5,10 @@ from court_detector import CourtDetector
 from homography import get_homography_matrix, transform_point
 
 
+CALIBRATION_WINDOW_FRAMES = 30
+CALIBRATION_RETRY_INTERVAL = 5
+
+
 class TennisTracker:
     def __init__(self, model_size: str = "yolov8n.pt"):
         print(f"🔄 Cargando modelo YOLOv8 ({model_size})...")
@@ -29,13 +33,23 @@ class TennisTracker:
             if not ret:
                 break
 
-            if frame_count == 0:
+            if homography_matrix is None and (
+                frame_count < CALIBRATION_WINDOW_FRAMES
+                or (frame_count - CALIBRATION_WINDOW_FRAMES)
+                % CALIBRATION_RETRY_INTERVAL == 0
+            ):
+                if frame_count == CALIBRATION_WINDOW_FRAMES:
+                    print(
+                        f"⚠️ No se encontró la pista en los primeros "
+                        f"{CALIBRATION_WINDOW_FRAMES} frames; se reintentará "
+                        f"cada {CALIBRATION_RETRY_INTERVAL} frames."
+                    )
                 court_corners = self.court_detector.detect_corners(frame)
-                if court_corners is not None:
+                if court_corners is not None and len(court_corners) == 4:
                     try:
                         homography_matrix = get_homography_matrix(court_corners)
-                    except ValueError:
-                        homography_matrix = None
+                    except (ValueError, cv2.error):
+                        pass
 
             # Inferencia filtrada por personas y pelotas de tenis
             results = self.model(frame, classes=self.target_classes, verbose=False)
@@ -83,4 +97,9 @@ class TennisTracker:
         cap.release()
         cv2.destroyAllWindows()
         print(f"✨ Inferencia completada. {frame_count} fotogramas analizados.")
+        if homography_matrix is None:
+            print(
+                "⚠️ No se pudo calibrar la pista; las coordenadas métricas "
+                "quedan como null."
+            )
         return telemetry
