@@ -10,7 +10,7 @@ COURT_WIDTH_METERS = 10.97
 
 
 def get_homography_matrix(src_points: Sequence[Sequence[float]]) -> np.ndarray:
-    """Map TL, TR, BR, BL pixel corners to court coordinates in meters."""
+    """Map image TL, TR, BR, BL to a horizontal court, far baseline to left."""
     source = np.asarray(src_points, dtype=np.float32)
     if source.shape != (4, 2):
         raise ValueError("src_points must contain exactly four 2D points")
@@ -28,9 +28,9 @@ def get_homography_matrix(src_points: Sequence[Sequence[float]]) -> np.ndarray:
     destination = np.asarray(
         [
             [0.0, 0.0],
-            [COURT_LENGTH_METERS, 0.0],
-            [COURT_LENGTH_METERS, COURT_WIDTH_METERS],
             [0.0, COURT_WIDTH_METERS],
+            [COURT_LENGTH_METERS, COURT_WIDTH_METERS],
+            [COURT_LENGTH_METERS, 0.0],
         ],
         dtype=np.float32,
     )

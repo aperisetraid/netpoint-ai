@@ -69,6 +69,10 @@ interface VideoPlayerProps {
 
 const courtLength = 23.77
 const courtWidth = 10.97
+// Must match PLAYER_BASELINE_MARGIN_METERS in apps/vision-ai/src/tracker.py
+const playerBaselineMarginMeters = 2
+const viewUnitsPerMeter = 100
+const viewMargin = playerBaselineMarginMeters * viewUnitsPerMeter
 let youtubeApiPromise: Promise<YouTubeApi> | null = null
 
 function formatPercent(value: number): string {
@@ -285,7 +289,7 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
 
   return (
     <svg
-      viewBox="0 0 2377 1097"
+      viewBox={`-${viewMargin} 0 ${2377 + viewMargin * 2} 1097`}
       className="h-full w-full"
       role="img"
       aria-label={`Posiciones del frame ${frame?.frame_index ?? 0} sobre una pista de tenis`}

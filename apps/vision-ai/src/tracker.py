@@ -2,11 +2,18 @@ import cv2
 from ultralytics import YOLO
 
 from court_detector import CourtDetector
-from homography import get_homography_matrix, transform_point
+from homography import (
+    COURT_LENGTH_METERS,
+    COURT_WIDTH_METERS,
+    get_homography_matrix,
+    transform_point,
+)
 
 
 CALIBRATION_WINDOW_FRAMES = 30
 CALIBRATION_RETRY_INTERVAL = 5
+PLAYER_BASELINE_MARGIN_METERS = 2.0
+MAX_COURT_PLAYERS = 2
 
 
 class TennisTracker:
@@ -60,6 +67,7 @@ class TennisTracker:
                 else cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
             )
             detections = []
+            player_detection_indexes = []
             for box in results[0].boxes:
                 class_id = int(box.cls[0].item())
                 bbox = [float(coordinate) for coordinate in box.xyxy[0].tolist()]
@@ -72,8 +80,18 @@ class TennisTracker:
                             ((x1 + x2) / 2, y2),
                             homography_matrix,
                         )
-                    except ValueError:
-                        pass
+                    except (ValueError, cv2.error):
+                        continue
+
+                    baseline_margin = (
+                        PLAYER_BASELINE_MARGIN_METERS if class_id == 0 else 0.0
+                    )
+                    if not (
+                        -baseline_margin <= x_meters
+                        <= COURT_LENGTH_METERS + baseline_margin
+                        and 0 <= y_meters <= COURT_WIDTH_METERS
+                    ):
+                        continue
 
                 detections.append({
                     "class": "player" if class_id == 0 else "ball",
@@ -82,6 +100,32 @@ class TennisTracker:
                     "x_meters": x_meters,
                     "y_meters": y_meters,
                 })
+                if class_id == 0:
+                    player_detection_indexes.append(len(detections) - 1)
+
+            if homography_matrix is not None and len(player_detection_indexes) > MAX_COURT_PLAYERS:
+                selected_player_indexes = set(sorted(
+                    player_detection_indexes,
+                    key=lambda detection_index: (
+                        max(
+                            0.0,
+                            -detections[detection_index]["x_meters"],
+                            detections[detection_index]["x_meters"]
+                            - COURT_LENGTH_METERS,
+                        ),
+                        abs(
+                            detections[detection_index]["y_meters"]
+                            - COURT_WIDTH_METERS / 2
+                        ),
+                        -detections[detection_index]["confidence"],
+                    ),
+                )[:MAX_COURT_PLAYERS])
+                detections = [
+                    detection
+                    for detection_index, detection in enumerate(detections)
+                    if detection["class"] != "player"
+                    or detection_index in selected_player_indexes
+                ]
 
             telemetry.append({
                 "frame_index": frame_index,
