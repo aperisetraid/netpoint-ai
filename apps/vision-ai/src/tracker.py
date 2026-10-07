@@ -13,7 +13,6 @@ from homography import (
 CALIBRATION_WINDOW_FRAMES = 30
 CALIBRATION_RETRY_INTERVAL = 5
 PLAYER_BASELINE_MARGIN_METERS = 2.0
-MAX_COURT_PLAYERS = 2
 
 
 class TennisTracker:
@@ -33,6 +32,7 @@ class TennisTracker:
         frame_count = 0
         telemetry = []
         homography_matrix = None
+        last_player_by_side = {}
         print("🚀 Iniciando inferencia con YOLOv8...")
 
         while cap.isOpened() and (max_frames is None or frame_count < max_frames):
@@ -67,7 +67,7 @@ class TennisTracker:
                 else cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
             )
             detections = []
-            player_detection_indexes = []
+            player_candidates_by_side = {}
             for box in results[0].boxes:
                 class_id = int(box.cls[0].item())
                 bbox = [float(coordinate) for coordinate in box.xyxy[0].tolist()]
@@ -93,39 +93,40 @@ class TennisTracker:
                     ):
                         continue
 
-                detections.append({
+                detection = {
                     "class": "player" if class_id == 0 else "ball",
                     "confidence": float(box.conf[0].item()),
                     "bbox": bbox,
                     "x_meters": x_meters,
                     "y_meters": y_meters,
-                })
-                if class_id == 0:
-                    player_detection_indexes.append(len(detections) - 1)
+                }
+                if homography_matrix is None or class_id != 0:
+                    detections.append(detection)
+                    continue
 
-            if homography_matrix is not None and len(player_detection_indexes) > MAX_COURT_PLAYERS:
-                selected_player_indexes = set(sorted(
-                    player_detection_indexes,
-                    key=lambda detection_index: (
-                        max(
-                            0.0,
-                            -detections[detection_index]["x_meters"],
-                            detections[detection_index]["x_meters"]
-                            - COURT_LENGTH_METERS,
-                        ),
-                        abs(
-                            detections[detection_index]["y_meters"]
-                            - COURT_WIDTH_METERS / 2
-                        ),
-                        -detections[detection_index]["confidence"],
-                    ),
-                )[:MAX_COURT_PLAYERS])
-                detections = [
-                    detection
-                    for detection_index, detection in enumerate(detections)
-                    if detection["class"] != "player"
-                    or detection_index in selected_player_indexes
-                ]
+                side = (
+                    "left"
+                    if x_meters < COURT_LENGTH_METERS / 2
+                    else "right"
+                )
+                current_candidate = player_candidates_by_side.get(side)
+                if (
+                    current_candidate is None
+                    or detection["confidence"] > current_candidate["confidence"]
+                ):
+                    player_candidates_by_side[side] = detection
+
+            if homography_matrix is not None:
+                selected_players = []
+                for side in ("left", "right"):
+                    player = player_candidates_by_side.get(side)
+                    if player is not None:
+                        last_player_by_side[side] = player
+                    else:
+                        player = last_player_by_side.get(side)
+                    if player is not None:
+                        selected_players.append(player.copy())
+                detections = selected_players + detections
 
             telemetry.append({
                 "frame_index": frame_index,
