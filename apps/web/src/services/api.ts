@@ -5,26 +5,27 @@ export interface ProcessMatchRequest {
 
 export interface ProcessMatchResponse {
   matchId: string
-  status: 'processing'
-  message: string
+  status: 'completed'
+  telemetry: FrameTelemetry[]
 }
 
-export interface ShotTelemetry {
-  shotNumber: number
-  timestamp: number
-  player: 'player1' | 'player2'
-  speedKmH: number
-  bounceCoordinates: {
-    x: number
-    y: number
-  }
-  isInside: boolean
+export interface DetectionTelemetry {
+  class: 'player' | 'ball'
+  confidence: number
+  bbox: [number, number, number, number]
+  x_meters: number | null
+  y_meters: number | null
+}
+
+export interface FrameTelemetry {
+  frame_index: number
+  timestamp_seconds: number
+  detections: DetectionTelemetry[]
 }
 
 export interface MatchTelemetryResponse {
   matchId: string
-  totalRallies: number
-  shots: ShotTelemetry[]
+  telemetry: FrameTelemetry[]
 }
 
 const defaultApiBaseUrl = 'http://localhost:3000'
