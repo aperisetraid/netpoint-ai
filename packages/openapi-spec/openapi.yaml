@@ -3,6 +3,8 @@ info:
   title: NetPoint AI API
   description: API REST para el procesado de partidos de tenis, extracción de telemetría y consulta táctica multi-agente.
   version: 1.0.0
+  license:
+    name: MIT
 servers:
   - url: http://localhost:3000/api/v1
     description: Servidor Local de Desarrollo
@@ -29,12 +31,14 @@ paths:
         '400':
           $ref: '#/components/responses/400BadRequest'
         '502':
-          description: El servicio de visión no pudo procesar el vídeo.
+          $ref: '#/components/responses/502BadGateway'
 
   /matches/{matchId}/status:
     get:
       summary: Consultar estado del procesamiento
+      description: Endpoint planificado, aún no implementado en el backend.
       operationId: getMatchStatus
+      x-implementation-status: planned
       parameters:
         - name: matchId
           in: path
@@ -55,7 +59,7 @@ paths:
   /matches/{matchId}/telemetry:
     get:
       summary: Obtener telemetría táctica y coordenadas para el Overlay
-      description: Devuelve las coordenadas 2D de la pista, trayectorias de la bola, botes (In/Out), velocidad y mapas de calor.
+      description: Devuelve las detecciones por fotograma (jugadores y bola) con bbox y coordenadas métricas de la pista.
       operationId: getMatchTelemetry
       parameters:
         - name: matchId
@@ -79,8 +83,9 @@ paths:
   /matches/{matchId}/chat:
     post:
       summary: Consulta conversacional al sistema Multi-Agente
-      description: Envía preguntas en lenguaje natural sobre el partido al pool de agentes (Táctico, Biomecánico, Estratégico).
+      description: Endpoint planificado, aún no implementado. Envía preguntas en lenguaje natural sobre el partido al pool de agentes (Táctico, Biomecánico, Estratégico).
       operationId: queryAgentChat
+      x-implementation-status: planned
       parameters:
         - name: matchId
           in: path
@@ -101,6 +106,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatQueryResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '404':
+          $ref: '#/components/responses/404NotFound'
 
 components:
   schemas:
@@ -142,95 +151,109 @@ components:
 
     MatchStatusResponse:
       type: object
+      additionalProperties: false
+      required:
+        - matchId
+        - status
       properties:
         matchId:
-          MatchStatusResponse:
-            type: object
-            properties:
-              matchId:
-                type: string
-                format: uuid
-              status:
-                type: string
-                enum: [queued, processing, completed, failed]
-                example: "completed"
-              progressPercentage:
-                type: integer
-                example: 100
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+          example: "completed"
+        progressPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 100
 
-          MatchTelemetryResponse:
-            type: object
-            additionalProperties: false
-            required:
-              - matchId
-              - telemetry
-            properties:
-              matchId:
-                type: string
-                format: uuid
-              telemetry:
-                type: array
-                items:
-                  $ref: '#/components/schemas/FrameTelemetry'
+    MatchTelemetryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - matchId
+        - telemetry
+      properties:
+        matchId:
+          type: string
+          format: uuid
+        telemetry:
+          type: array
+          items:
+            $ref: '#/components/schemas/FrameTelemetry'
 
-          FrameTelemetry:
-            type: object
-            additionalProperties: false
-            required:
-              - frame_index
-              - timestamp_seconds
-              - detections
-            properties:
-              frame_index:
-                type: integer
-                example: 0
-              timestamp_seconds:
-                type: number
-                example: 0.04
-              detections:
-                type: array
-                items:
-                  $ref: '#/components/schemas/DetectionTelemetry'
+    FrameTelemetry:
+      type: object
+      additionalProperties: false
+      required:
+        - frame_index
+        - timestamp_seconds
+        - detections
+      properties:
+        frame_index:
+          type: integer
+          example: 0
+        timestamp_seconds:
+          type: number
+          example: 0.04
+        detections:
+          type: array
+          items:
+            $ref: '#/components/schemas/DetectionTelemetry'
 
-          DetectionTelemetry:
-            type: object
-            additionalProperties: false
-            required:
-              - class
-              - confidence
-              - bbox
-              - x_meters
-              - y_meters
-            properties:
-              class:
-                type: string
-                enum: [player, ball]
-              confidence:
-                type: number
-                example: 0.97
-              bbox:
-                type: array
-                minItems: 4
-                maxItems: 4
-                items:
-                  type: number
-              x_meters:
-                type: number
-                nullable: true
-                example: 1.2
-              y_meters:
-                type: number
-                nullable: true
-                example: 4.5
+    DetectionTelemetry:
+      type: object
+      additionalProperties: false
+      required:
+        - class
+        - confidence
+        - bbox
+        - x_meters
+        - y_meters
+      properties:
+        class:
+          type: string
+          enum: [player, ball]
+        confidence:
+          type: number
+          example: 0.97
+        bbox:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+        x_meters:
+          type: number
+          nullable: true
+          description: Posición en metros a lo largo de la pista; null si la pista no está calibrada.
+          example: 1.2
+        y_meters:
+          type: number
+          nullable: true
+          description: Posición en metros a lo ancho de la pista; null si la pista no está calibrada.
+          example: 4.5
 
-          ChatQueryRequest:
-            type: object
-            required:
-              - prompt
-            properties:
-              prompt:
-                type: string
-                example: "¿Por qué estoy perdiendo puntos cuando juego cruzado desde el fondo?"
+    ChatQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          example: "¿Por qué estoy perdiendo puntos cuando juego cruzado desde el fondo?"
+
+    ChatQueryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - answer
+        - agentRole
+      properties:
         answer:
           type: string
           example: "Has realizado 14 tiros cruzados. En un 65% de los casos la bola cayó corta..."
@@ -242,8 +265,30 @@ components:
           items:
             type: string
 
+    ErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+
   responses:
     400BadRequest:
       description: Solicitud incorrecta o parámetros faltantes.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     404NotFound:
       description: El recurso solicitado no existe.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    502BadGateway:
+      description: El servicio de visión no pudo procesar el vídeo.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

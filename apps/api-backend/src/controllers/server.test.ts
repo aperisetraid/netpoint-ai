@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+
+import { load as loadYaml } from 'js-yaml';
 
 import { buildApp } from './server.js';
 
@@ -154,6 +157,41 @@ test('invalid payloads and IDs return 400 while unknown IDs return 404', async (
   assert.equal(invalidUrlResponse.statusCode, 400);
   assert.equal(invalidMatchIdResponse.statusCode, 400);
   assert.equal(unknownMatchIdResponse.statusCode, 404);
+});
+
+test('OpenAPI contract has no unresolved $ref', async () => {
+  const specUrl = new URL('../../../../packages/openapi-spec/openapi.yaml', import.meta.url);
+  const spec = loadYaml(await readFile(specUrl, 'utf8')) as Record<string, unknown>;
+
+  const unresolved: string[] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (node === null || typeof node !== 'object') {
+      return;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === '$ref' && typeof value === 'string') {
+        const target = value
+          .replace(/^#\//, '')
+          .split('/')
+          .reduce<unknown>(
+            (current, segment) => (current as Record<string, unknown> | undefined)?.[segment],
+            spec,
+          );
+        if (target === undefined) {
+          unresolved.push(value);
+        }
+      } else {
+        visit(value);
+      }
+    }
+  };
+  visit(spec);
+
+  assert.deepEqual(unresolved, []);
 });
 
 test('health and documentation endpoints are available', async () => {
