@@ -5,6 +5,12 @@ export type MatchPlayer = 'player1' | 'player2';
 export interface MatchProcessRequest {
   sourceUrl: string;
   title?: string;
+  matchId?: string;
+}
+
+export interface MatchProgressResponse {
+  processedFrames: number;
+  totalFrames: number | null;
 }
 
 export interface MatchProcessResponse {
@@ -19,12 +25,16 @@ export interface DetectionTelemetry {
   bbox: [number, number, number, number];
   x_meters: number | null;
   y_meters: number | null;
+  carried_forward?: boolean;
 }
 
 export interface FrameTelemetry {
   frame_index: number;
   timestamp_seconds: number;
   detections: DetectionTelemetry[];
+  image_width?: number;
+  image_height?: number;
+  court_corners?: [number, number][] | null;
 }
 
 export interface MatchTelemetryResponse {

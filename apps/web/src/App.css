@@ -221,3 +221,103 @@
     linear-gradient(90deg, transparent 49%, rgba(255, 255, 255, 0.04) 50%, transparent 51%);
   background-size: 42px 42px;
 }
+
+.frame-inspector {
+  min-width: 0;
+  margin-top: 24px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 20px;
+}
+
+.frame-inspector__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.frame-inspector__heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.frame-inspector__heading > span,
+.frame-inspector__status {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-inspector__layers,
+.frame-inspector__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+
+.frame-inspector__layer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.frame-inspector__layer--court { color: #fbbf24; accent-color: #fbbf24; }
+.frame-inspector__layer--player { color: #bef264; accent-color: #bef264; }
+.frame-inspector__layer--ball { color: #38bdf8; accent-color: #38bdf8; }
+
+.frame-inspector__image,
+.frame-inspector__empty {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  margin-top: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #050505;
+}
+
+.frame-inspector__image img,
+.frame-inspector__image svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.frame-inspector__image svg { pointer-events: none; }
+
+.frame-inspector__empty,
+.frame-inspector__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.frame-inspector__empty { aspect-ratio: 16 / 9; }
+.frame-inspector__placeholder { position: absolute; inset: 0; }
+
+.frame-overlay__court { stroke: #fbbf24; fill: rgba(251, 191, 36, 0.08); }
+.frame-overlay__court circle { fill: #fbbf24; }
+.frame-overlay__player { stroke: #bef264; fill: none; }
+.frame-overlay__ball { stroke: #38bdf8; fill: none; }
+.frame-inspector__image polygon,
+.frame-inspector__image rect,
+.frame-inspector__image circle { stroke-width: 2; vector-effect: non-scaling-stroke; }
+.frame-overlay__carried { stroke-dasharray: 6 4; }
+.frame-overlay__label-bg { fill: rgba(0, 0, 0, 0.85); stroke: none; }
+.frame-inspector__image text { fill: #fff; stroke: none; font-weight: 600; }

@@ -3,19 +3,21 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  Clock3,
-  Pause,
-  Play,
   Radar,
   RefreshCw,
+  Link2,
+  Upload,
   Video,
 } from 'lucide-react'
 
 import {
   ApiError,
-  type DetectionTelemetry,
   type FrameTelemetry,
+  type MatchProgressResponse,
+  getMatchProgress,
+  getMatchFrameUrl,
   processMatch,
+  uploadMatchVideo,
 } from './services/api'
 import './App.css'
 
@@ -62,17 +64,13 @@ interface CourtVisualizationProps {
 
 interface VideoPlayerProps {
   sourceUrl: string
-  currentTime: number
-  maxTime: number
   onTimeChange: (time: number) => void
+  onPlaybackChange: (playing: boolean) => void
 }
 
 const courtLength = 23.77
 const courtWidth = 10.97
-// Must match PLAYER_BASELINE_MARGIN_METERS in apps/vision-ai/src/tracker.py
-const playerBaselineMarginMeters = 2
-const viewUnitsPerMeter = 100
-const viewMargin = playerBaselineMarginMeters * viewUnitsPerMeter
+const maximumVideoSizeBytes = 1024 * 1024 * 1024
 let youtubeApiPromise: Promise<YouTubeApi> | null = null
 
 function formatPercent(value: number): string {
@@ -84,10 +82,6 @@ function formatTime(value: number): string {
   const seconds = Math.floor(value % 60)
   const centiseconds = Math.floor((value % 1) * 100)
   return `${minutes}:${String(seconds).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`
-}
-
-function formatDecimal(value: number): string {
-  return value.toFixed(1)
 }
 
 function getYouTubeVideoId(sourceUrl: string): string | null {
@@ -132,7 +126,7 @@ function loadYouTubeApi(): Promise<YouTubeApi> {
   return youtubeApiPromise
 }
 
-function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPlayerProps) {
+function VideoPlayer({ sourceUrl, onTimeChange, onPlaybackChange }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const youTubeMountRef = useRef<HTMLDivElement>(null)
   const youTubePlayerRef = useRef<YouTubePlayer | null>(null)
@@ -167,6 +161,11 @@ function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPla
             onStateChange: (event) => {
               if (isActive) {
                 setIsPlaying(event.data === 1)
+                onPlaybackChange(event.data === 1)
+                const activePlayer = youTubePlayerRef.current
+                if (activePlayer) {
+                  onTimeChange(activePlayer.getCurrentTime())
+                }
               }
             },
           },
@@ -184,10 +183,10 @@ function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPla
       youTubePlayerRef.current = null
       setYouTubeReady(false)
     }
-  }, [youTubeVideoId])
+  }, [youTubeVideoId, onPlaybackChange, onTimeChange])
 
   useEffect(() => {
-    if (!youTubeReady || !youTubeVideoId) {
+    if (!youTubeReady || !youTubeVideoId || !isPlaying) {
       return
     }
     const intervalId = window.setInterval(() => {
@@ -197,37 +196,7 @@ function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPla
       }
     }, 200)
     return () => window.clearInterval(intervalId)
-  }, [onTimeChange, youTubeReady, youTubeVideoId])
-
-  function seekTo(time: number) {
-    onTimeChange(time)
-    if (youTubeVideoId) {
-      youTubePlayerRef.current?.seekTo(time, true)
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = time
-    }
-  }
-
-  function togglePlayback() {
-    if (youTubeVideoId) {
-      const player = youTubePlayerRef.current
-      if (isPlaying) {
-        player?.pauseVideo()
-      } else {
-        player?.playVideo()
-      }
-      return
-    }
-    const video = videoRef.current
-    if (!video) {
-      return
-    }
-    if (video.paused) {
-      void video.play()
-    } else {
-      video.pause()
-    }
-  }
+  }, [onTimeChange, youTubeReady, youTubeVideoId, isPlaying])
 
   return (
     <div className="video-player">
@@ -241,8 +210,19 @@ function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPla
               src={sourceUrl}
               controls
               playsInline
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
+              onPlay={() => {
+                setIsPlaying(true)
+                onPlaybackChange(true)
+              }}
+              onPause={(event) => {
+                setIsPlaying(false)
+                onTimeChange(event.currentTarget.currentTime)
+                onPlaybackChange(false)
+              }}
+              onEnded={() => {
+                setIsPlaying(false)
+                onPlaybackChange(false)
+              }}
               onTimeUpdate={(event) => onTimeChange(event.currentTarget.currentTime)}
             />
           )
@@ -254,7 +234,7 @@ function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPla
         )}
         {playerError ? <p className="video-player__error">{playerError}</p> : null}
       </div>
-      <div className="video-player__controls">
+      {/* <div className="video-player__controls">
         <button
           className="icon-button"
           type="button"
@@ -277,8 +257,119 @@ function VideoPlayer({ sourceUrl, currentTime, maxTime, onTimeChange }: VideoPla
           onChange={(event) => seekTo(Number(event.target.value))}
         />
         <span className="video-player__time">{formatTime(maxTime)}</span>
-      </div>
+      </div> */}
     </div>
+  )
+}
+
+type InspectionLayer = 'court' | 'player' | 'ball'
+
+function AnnotatedFrame({ matchId, frame, layers }: {
+  matchId: string
+  frame: FrameTelemetry
+  layers: Record<InspectionLayer, boolean>
+}) {
+  const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [retry, setRetry] = useState(0)
+  const width = frame.image_width ?? 1
+  const height = frame.image_height ?? 1
+  const labelSize = width / 45
+  const imageUrl = `${getMatchFrameUrl(matchId, frame.frame_index)}?retry=${retry}`
+
+  return (
+    <div className="frame-inspector__image" style={{ aspectRatio: `${width} / ${height}` }}>
+      <img
+        key={imageUrl}
+        src={imageUrl}
+        alt={`Fotograma ${frame.frame_index} del video analizado`}
+        onLoad={() => setImageState('ready')}
+        onError={() => setImageState('error')}
+        style={{ visibility: imageState === 'ready' ? 'visible' : 'hidden' }}
+      />
+      {imageState === 'ready' ? (
+        <svg viewBox={`0 0 ${width} ${height}`} aria-label="Detecciones y calibración del fotograma" role="img">
+          {layers.court && frame.court_corners?.length === 4 ? (
+            <g className="frame-overlay__court">
+              <polygon points={frame.court_corners.map((point) => point.join(',')).join(' ')} />
+              {frame.court_corners.map(([pointX, pointY], index) => (
+                <circle key={index} cx={pointX} cy={pointY} r={width / 180} />
+              ))}
+            </g>
+          ) : null}
+          {frame.detections.filter((detection) => layers[detection.class]).map((detection, index) => {
+            const [left, top, right, bottom] = detection.bbox
+            const label = `${detection.class === 'player' ? 'Jugador' : 'Pelota'} ${formatPercent(detection.confidence * 100)}${detection.carried_forward ? ' (previo)' : ''}`
+            const labelY = Math.max(labelSize * 1.3, top)
+            const labelWidth = label.length * labelSize * 0.6
+            const labelX = Math.max(0, Math.min(left, width - labelWidth))
+            return (
+              <g key={`${detection.class}-${index}`} className={`frame-overlay__${detection.class}`}>
+                <rect x={left} y={top} width={Math.max(0, right - left)} height={Math.max(0, bottom - top)}
+                  className={detection.carried_forward ? 'frame-overlay__carried' : undefined} />
+                <rect className="frame-overlay__label-bg" x={labelX} y={labelY - labelSize * 1.3} width={labelWidth} height={labelSize * 1.3} />
+                <text x={labelX + labelSize * 0.2} y={labelY - labelSize * 0.25} fontSize={labelSize}>{label}</text>
+              </g>
+            )
+          })}
+        </svg>
+      ) : (
+        <div className="frame-inspector__placeholder" role="status">
+          {imageState === 'loading' ? <RefreshCw size={20} className="animate-spin" /> : <AlertTriangle size={20} />}
+          <span>{imageState === 'loading' ? 'Cargando fotograma...' : 'Fotograma no disponible. Vuelve a analizar el video si reiniciaste el servicio.'}</span>
+          {imageState === 'error' ? (
+            <button className="icon-button" type="button" title="Reintentar carga" aria-label="Reintentar carga"
+              onClick={() => { setImageState('loading'); setRetry(retry + 1) }}>
+              <RefreshCw size={16} />
+            </button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FrameInspector({ analysis, frame, isPlaying }: {
+  analysis: AnalysisResult | null
+  frame?: FrameTelemetry
+  isPlaying: boolean
+}) {
+  const [layers, setLayers] = useState<Record<InspectionLayer, boolean>>({ court: true, player: true, ball: true })
+  const hasImageMetadata = Boolean(frame?.image_width && frame?.image_height)
+  const playerCount = frame?.detections.filter((detection) => detection.class === 'player').length ?? 0
+  const ballCount = frame?.detections.filter((detection) => detection.class === 'ball').length ?? 0
+
+  return (
+    <section className="frame-inspector" aria-label="Inspección del fotograma">
+      <div className="frame-inspector__heading">
+        <h3><Radar size={18} /> Fotograma actual</h3>
+        <span>{frame ? `#${frame.frame_index} · ${formatTime(frame.timestamp_seconds)}` : 'Sin fotograma'}</span>
+      </div>
+      <div className="frame-inspector__layers" role="group" aria-label="Capas de detección">
+        {([
+          ['court', 'Pista'], ['player', `Jugadores (${playerCount})`], ['ball', `Pelota (${ballCount})`],
+        ] as const).map(([layer, label]) => (
+          <label key={layer} className={`frame-inspector__layer frame-inspector__layer--${layer}`}>
+            <input type="checkbox" checked={layers[layer]} onChange={(event) => setLayers({ ...layers, [layer]: event.target.checked })} />
+            {label}
+          </label>
+        ))}
+      </div>
+      {analysis && frame && hasImageMetadata && !isPlaying ? (
+        <AnnotatedFrame key={`${analysis.matchId}-${frame.frame_index}`} matchId={analysis.matchId} frame={frame} layers={layers} />
+      ) : (
+        <div className="frame-inspector__empty" role="status">
+          <Video size={24} />
+          <span>{!analysis ? 'Sin video analizado' : isPlaying ? 'Video en reproducción' : !frame ? 'Sin fotograma analizado en esta posición' : 'Este análisis no incluye imágenes. Vuelve a analizar el video.'}</span>
+        </div>
+      )}
+      {analysis && frame && !isPlaying ? (
+        <div className="frame-inspector__status">
+          <span>{frame.court_corners?.length === 4 ? 'Pista calibrada' : 'Pista sin calibrar'}</span>
+          <span>{frame.detections.length ? `${frame.detections.length} detecciones` : 'Sin detecciones'}</span>
+          {frame.detections.some((detection) => detection.carried_forward) ? <span>Posiciones previas en línea discontinua</span> : null}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -286,10 +377,15 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
   const positionedDetections = frame?.detections.filter(
     (detection) => detection.x_meters !== null && detection.y_meters !== null,
   ) ?? []
+  const pointXs = positionedDetections.map(
+    (detection) => ((detection.x_meters ?? 0) / courtLength) * 2377,
+  )
+  const viewLeft = Math.min(0, ...pointXs.map((pointX) => pointX - 80))
+  const viewRight = Math.max(2377, ...pointXs.map((pointX) => pointX + 80))
 
   return (
     <svg
-      viewBox={`-${viewMargin} 0 ${2377 + viewMargin * 2} 1097`}
+      viewBox={`${viewLeft} 0 ${viewRight - viewLeft} 1097`}
       className="h-full w-full"
       role="img"
       aria-label={`Posiciones del frame ${frame?.frame_index ?? 0} sobre una pista de tenis`}
@@ -326,44 +422,38 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
   )
 }
 
-function DetectionRow({ detection }: { detection: DetectionTelemetry }) {
-  const hasPosition = detection.x_meters !== null && detection.y_meters !== null
-
-  return (
-    <article className="detection-row">
-      <div className="detection-row__identity">
-        <span className={`detection-dot detection-dot--${detection.class}`} />
-        <span>{detection.class === 'player' ? 'Jugador' : 'Pelota'}</span>
-      </div>
-      <span className="detection-row__confidence">{formatPercent(detection.confidence * 100)}</span>
-      <span className="detection-row__position">
-        {hasPosition && detection.x_meters !== null && detection.y_meters !== null
-          ? `${formatDecimal(detection.x_meters)} m · ${formatDecimal(detection.y_meters)} m`
-          : 'Sin calibración'}
-      </span>
-    </article>
-  )
-}
-
 function App() {
   const [sourceUrl, setSourceUrl] = useState('')
+  const [inputMode, setInputMode] = useState<'url' | 'file'>('url')
+  const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
+  const [localPreviewUrl, setLocalPreviewUrl] = useState('')
   const [title, setTitle] = useState('')
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [processingProgress, setProcessingProgress] = useState<MatchProgressResponse>({
+    processedFrames: 0,
+    totalFrames: null,
+  })
   const [currentTime, setCurrentTime] = useState(0)
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const previewUrlRef = useRef('')
   const requestSequenceRef = useRef(0)
 
+  useEffect(() => () => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+    }
+  }, [])
+
   const frames = analysis?.telemetry ?? []
-  const maxTime = frames.at(-1)?.timestamp_seconds ?? 0
   const currentFrame = frames.reduce<FrameTelemetry | undefined>(
     (selectedFrame, frame) =>
       frame.timestamp_seconds <= currentTime ? frame : selectedFrame,
     undefined,
   )
   const currentDetections = currentFrame?.detections ?? []
-  const playerCount = currentDetections.filter((detection) => detection.class === 'player').length
-  const ballCount = currentDetections.filter((detection) => detection.class === 'ball').length
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -374,19 +464,42 @@ function App() {
 
     const trimmedSourceUrl = sourceUrl.trim()
     const trimmedTitle = title.trim()
+    const uploadFile = inputMode === 'file' ? selectedVideo : null
+    if (!uploadFile && !trimmedSourceUrl) {
+      return
+    }
+    const matchId = window.crypto.randomUUID()
     const requestSequence = requestSequenceRef.current + 1
 
     requestSequenceRef.current = requestSequence
     setIsSubmitting(true)
+    setProcessingProgress({ processedFrames: 0, totalFrames: null })
     setErrorMessage(null)
     setAnalysis(null)
     setCurrentTime(0)
+    setIsVideoPlaying(false)
+
+    let processingFinished = false
+    const progressPolling = (async () => {
+      while (!processingFinished) {
+        try {
+          const progress = await getMatchProgress(matchId)
+          if (!processingFinished && requestSequenceRef.current === requestSequence) {
+            setProcessingProgress(progress)
+          }
+        } catch {
+          // Progress may not be available until the video reaches the vision service.
+        }
+        if (!processingFinished) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500))
+        }
+      }
+    })()
 
     try {
-      const processResponse = await processMatch({
-        sourceUrl: trimmedSourceUrl,
-        title: trimmedTitle || undefined,
-      })
+      const processResponse = uploadFile
+        ? await uploadMatchVideo(uploadFile, trimmedTitle || undefined, matchId)
+        : await processMatch({ sourceUrl: trimmedSourceUrl, title: trimmedTitle || undefined, matchId })
 
       if (requestSequence !== requestSequenceRef.current) {
         return
@@ -395,8 +508,8 @@ function App() {
       setAnalysis({
         matchId: processResponse.matchId,
         status: processResponse.status,
-        sourceUrl: trimmedSourceUrl,
-        title: trimmedTitle || undefined,
+        sourceUrl: uploadFile ? localPreviewUrl : trimmedSourceUrl,
+        title: trimmedTitle || (uploadFile ? uploadFile.name : undefined),
         telemetry: processResponse.telemetry,
       })
       setCurrentTime(processResponse.telemetry[0]?.timestamp_seconds ?? 0)
@@ -411,6 +524,8 @@ function App() {
         setErrorMessage('Ocurrió un error inesperado durante el análisis.')
       }
     } finally {
+      processingFinished = true
+      await progressPolling
       if (requestSequence === requestSequenceRef.current) {
         setIsSubmitting(false)
       }
@@ -470,8 +585,8 @@ function App() {
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-          <section className="panel-surface rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
+        <section className="grid gap-6 lg:grid-cols-2">
+          <section className="panel-surface self-start rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
@@ -484,18 +599,73 @@ function App() {
               </div>
             </div>
 
+            <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/10 bg-black/25 p-1" role="group" aria-label="Origen del video">
+              <button type="button" aria-pressed={inputMode === 'url'} onClick={() => setInputMode('url')}
+                className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition ${inputMode === 'url' ? 'bg-lime-300 text-zinc-950' : 'text-white/65 hover:bg-white/5'}`}>
+                <Link2 className="h-4 w-4" /> URL
+              </button>
+              <button type="button" aria-pressed={inputMode === 'file'} onClick={() => setInputMode('file')}
+                className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition ${inputMode === 'file' ? 'bg-lime-300 text-zinc-950' : 'text-white/65 hover:bg-white/5'}`}>
+                <Upload className="h-4 w-4" /> Archivo
+              </button>
+            </div>
+
             <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-white/78">URL del video</span>
-                <input
-                  type="url"
-                  required
-                  value={sourceUrl}
-                  onChange={(event) => setSourceUrl(event.target.value)}
-                  placeholder="https://..."
-                  className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-lime-400/60 focus:ring-2 focus:ring-lime-400/20"
-                />
-              </label>
+              {inputMode === 'url' ? (
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-white/78">URL del video</span>
+                  <input
+                    type="url"
+                    required
+                    value={sourceUrl}
+                    onChange={(event) => setSourceUrl(event.target.value)}
+                    placeholder="https://..."
+                    className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-lime-400/60 focus:ring-2 focus:ring-lime-400/20"
+                  />
+                </label>
+              ) : (
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    className="sr-only"
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.m4v,.mkv"
+                    aria-label="Seleccionar archivo de video"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0]
+                      event.currentTarget.value = ''
+                      if (!file) return
+                      const extension = file.name.split('.').at(-1)?.toLowerCase()
+                      if (!['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm'].includes(extension ?? '')) {
+                        setErrorMessage('Formato no compatible. Selecciona MP4, M4V, MOV, AVI, MKV o WebM.')
+                        return
+                      }
+                      if (file.size > maximumVideoSizeBytes) {
+                        setErrorMessage('El archivo supera el límite de 1 GB.')
+                        return
+                      }
+                      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+                      const previewUrl = URL.createObjectURL(file)
+                      previewUrlRef.current = previewUrl
+                      setLocalPreviewUrl(previewUrl)
+                      setSelectedVideo(file)
+                      setErrorMessage(null)
+                    }}
+                  />
+                  <button type="button" onClick={() => fileInputRef.current?.click()}
+                    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-black/25 px-4 py-3 text-sm font-medium text-white/80 transition hover:border-lime-300/60 hover:text-lime-200">
+                    <Upload className="h-4 w-4" />
+                    {selectedVideo ? 'Cambiar video' : 'Seleccionar archivo de video'}
+                  </button>
+                  {selectedVideo ? (
+                    <p className="mt-2 break-all text-xs text-white/55">
+                      {selectedVideo.name} · {(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs text-white/45">MP4, M4V, MOV, AVI, MKV o WebM · máximo 1 GB</p>
+                  )}
+                </div>
+              )}
 
               <label className="block">
                 <span className="mb-2 block text-sm font-medium text-white/78">Título operativo</span>
@@ -510,13 +680,13 @@ function App() {
 
               <button
                 type="submit"
-                disabled={isSubmitting || sourceUrl.trim().length === 0}
+                disabled={isSubmitting || (inputMode === 'url' ? sourceUrl.trim().length === 0 : !selectedVideo)}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-lime-300 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:bg-lime-100/50"
               >
                 {isSubmitting ? (
                   <>
                     <RefreshCw className="h-4 w-4 animate-spin" />
-                    Analizando...
+                    {inputMode === 'file' ? 'Subiendo y analizando...' : 'Analizando...'}
                   </>
                 ) : (
                   <>
@@ -526,6 +696,18 @@ function App() {
                 )}
               </button>
             </form>
+
+            {isSubmitting ? (
+              <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-lime-300/20 bg-lime-300/5 px-4 py-3 text-sm" role="status" aria-live="polite">
+                <span className="text-white/65">Fotogramas procesados</span>
+                <strong className="font-mono text-lime-200">
+                  {processingProgress.processedFrames.toLocaleString('es-ES')}
+                  {processingProgress.totalFrames !== null
+                    ? ` / ${processingProgress.totalFrames.toLocaleString('es-ES')}`
+                    : ''}
+                </strong>
+              </div>
+            ) : null}
 
             <div className="mt-5 rounded-3xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/60">
               El servicio procesa el video y devuelve detecciones sincronizadas por fotograma.
@@ -556,56 +738,10 @@ function App() {
                 </div>
               </div>
             ) : null}
+            <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
           </section>
 
-          <section className="grid gap-6">
-            <section className="panel-surface rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
-                    Resumen
-                  </p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">Métricas del partido</h2>
-                </div>
-                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/55">
-                  Frame {currentFrame?.frame_index ?? '--'}
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <article className="rounded-3xl border border-white/8 bg-black/25 p-4">
-                  <p className="text-xs uppercase tracking-[0.22em] text-white/45">Fotogramas</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">{analysis ? frames.length : '--'}</p>
-                </article>
-                <article className="rounded-3xl border border-white/8 bg-black/25 p-4">
-                  <p className="text-xs uppercase tracking-[0.22em] text-white/45">Jugadores en frame</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">
-                    {analysis ? playerCount : '--'}
-                  </p>
-                </article>
-                <article className="rounded-3xl border border-white/8 bg-black/25 p-4">
-                  <p className="text-xs uppercase tracking-[0.22em] text-white/45">Pelotas en frame</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">
-                    {analysis ? ballCount : '--'}
-                  </p>
-                </article>
-              </div>
-
-              {!analysis && !isSubmitting && !errorMessage ? (
-                <div className="mt-5 rounded-3xl border border-dashed border-white/10 bg-white/4 p-5 text-sm text-white/55">
-                  Carga una URL y ejecuta el análisis para explorar sus detecciones por fotograma.
-                </div>
-              ) : null}
-
-              {isSubmitting ? (
-                <div className="mt-5 flex items-center gap-3 rounded-3xl border border-white/10 bg-black/20 p-5 text-sm text-white/70">
-                  <RefreshCw className="h-5 w-5 animate-spin text-lime-300" />
-                  Procesando video y generando frames...
-                </div>
-              ) : null}
-            </section>
-
-            <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <section className="grid min-w-0 content-start gap-6">
               <section className="panel-surface overflow-hidden rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -619,7 +755,7 @@ function App() {
                   </span>
                 </div>
 
-                <div className="mt-5 aspect-video rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(34,197,94,0.08),rgba(0,0,0,0))] p-3">
+                <div className="mt-5 aspect-[2.2/1] rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(34,197,94,0.08),rgba(0,0,0,0))] p-3">
                   {analysis ? (
                     <CourtVisualization frame={currentFrame} />
                   ) : (
@@ -629,35 +765,6 @@ function App() {
                   )}
                 </div>
               </section>
-
-              <section className="panel-surface rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
-                      Frame activo
-                    </p>
-                    <h2 className="mt-2 text-xl font-semibold text-white">Detecciones</h2>
-                  </div>
-                  {analysis ? (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/55">
-                      {currentFrame ? formatTime(currentFrame.timestamp_seconds) : 'Sin frame'}
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="mt-5 grid gap-2">
-                  {currentDetections.length ? (
-                    currentDetections.map((detection, index) => (
-                      <DetectionRow key={`${currentFrame?.frame_index}-${detection.class}-${index}`} detection={detection} />
-                    ))
-                  ) : (
-                    <div className="rounded-3xl border border-dashed border-white/10 bg-white/4 p-5 text-sm text-white/55">
-                      {currentFrame ? 'No hay detecciones en este fotograma.' : 'Las detecciones aparecerán al procesar un video.'}
-                    </div>
-                  )}
-                </div>
-              </section>
-            </section>
 
             <section className="panel-surface rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -675,35 +782,9 @@ function App() {
               <div className="mt-5 grid gap-5 xl:grid-cols-[1.45fr_0.55fr]">
                 <VideoPlayer
                   sourceUrl={analysis?.sourceUrl ?? ''}
-                  currentTime={currentTime}
-                  maxTime={maxTime}
                   onTimeChange={setCurrentTime}
+                  onPlaybackChange={setIsVideoPlaying}
                 />
-
-                <div className="grid content-start gap-3">
-                  <div className="playback-stat">
-                    <Clock3 className="h-4 w-4 text-lime-300" />
-                    <div>
-                      <p className="playback-stat__label">Timestamp activo</p>
-                      <p className="playback-stat__value">{formatTime(currentTime)}</p>
-                    </div>
-                  </div>
-                  <div className="playback-stat">
-                    <Radar className="h-4 w-4 text-lime-300" />
-                    <div>
-                      <p className="playback-stat__label">Frame seleccionado</p>
-                      <p className="playback-stat__value">{currentFrame?.frame_index ?? '--'}</p>
-                    </div>
-                  </div>
-                  <div className="playback-stat">
-                    <Activity className="h-4 w-4 text-lime-300" />
-                    <div>
-                      <p className="playback-stat__label">Detecciones en el frame</p>
-                      <p className="playback-stat__value">{currentDetections.length}</p>
-                    </div>
-                  </div>
-                  <p className="break-all px-1 text-xs text-white/40">Match ID: {analysis?.matchId ?? '--'}</p>
-                </div>
               </div>
             </section>
           </section>

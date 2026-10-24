@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { Readable } from 'node:stream';
 
 import type { MatchProcessRequest } from '../domain/match.entity.js';
 import { MatchNotFoundError, GetTelemetryUseCase } from '../use-cases/get-telemetry.usecase.js';
@@ -19,6 +20,7 @@ const DETECTION_SCHEMA = {
     },
     x_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
     y_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+    carried_forward: { type: 'boolean' },
   },
 } as const;
 
@@ -29,6 +31,19 @@ const FRAME_SCHEMA = {
   properties: {
     frame_index: { type: 'integer' },
     timestamp_seconds: { type: 'number' },
+    image_width: { type: 'integer', minimum: 1 },
+    image_height: { type: 'integer', minimum: 1 },
+    court_corners: {
+      anyOf: [
+        {
+          type: 'array',
+          minItems: 4,
+          maxItems: 4,
+          items: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' } },
+        },
+        { type: 'null' },
+      ],
+    },
     detections: {
       type: 'array',
       items: DETECTION_SCHEMA,
@@ -57,6 +72,7 @@ const PROCESS_MATCH_SCHEMA = {
     properties: {
       sourceUrl: { type: 'string', minLength: 1 },
       title: { type: 'string' },
+      matchId: { type: 'string', format: 'uuid' },
     },
   },
   response: {
@@ -84,6 +100,19 @@ const PROCESS_MATCH_SCHEMA = {
   },
 } as const;
 
+const UPLOAD_MATCH_SCHEMA = {
+  headers: {
+    type: 'object',
+    required: ['x-video-filename'],
+    properties: {
+      'x-match-id': { type: 'string', format: 'uuid' },
+      'x-video-filename': { type: 'string', minLength: 1 },
+      'x-title': { type: 'string' },
+    },
+  },
+  response: PROCESS_MATCH_SCHEMA.response,
+} as const;
+
 const MATCH_TELEMETRY_SCHEMA = {
   params: {
     type: 'object',
@@ -95,6 +124,33 @@ const MATCH_TELEMETRY_SCHEMA = {
   },
   response: {
     200: TELEMETRY_RESPONSE_SCHEMA,
+  },
+} as const;
+
+const MATCH_PROGRESS_SCHEMA = {
+  params: MATCH_TELEMETRY_SCHEMA.params,
+  response: {
+    200: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['processedFrames', 'totalFrames'],
+      properties: {
+        processedFrames: { type: 'integer', minimum: 0 },
+        totalFrames: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+      },
+    },
+    400: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['message'],
+      properties: { message: { type: 'string' } },
+    },
+    502: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['message'],
+      properties: { message: { type: 'string' } },
+    },
   },
 } as const;
 
@@ -123,7 +179,11 @@ export interface MatchControllerDependencies {
 export class MatchController {
   readonly processMatchSchema = PROCESS_MATCH_SCHEMA;
 
+  readonly uploadMatchSchema = UPLOAD_MATCH_SCHEMA;
+
   readonly matchTelemetrySchema = MATCH_TELEMETRY_SCHEMA;
+
+  readonly matchProgressSchema = MATCH_PROGRESS_SCHEMA;
 
   constructor(private readonly dependencies: MatchControllerDependencies) {}
 
@@ -133,6 +193,10 @@ export class MatchController {
   ): Promise<void> {
     if (!isValidHttpUrl(request.body.sourceUrl)) {
       await reply.status(400).send({ message: 'sourceUrl must be a valid http or https URL.' });
+      return;
+    }
+    if (request.body.matchId && !isValidUuid(request.body.matchId)) {
+      await reply.status(400).send({ message: 'matchId must be a valid UUID.' });
       return;
     }
 
@@ -145,6 +209,60 @@ export class MatchController {
         return;
       }
 
+      throw error;
+    }
+  }
+
+  async uploadMatch(
+    request: FastifyRequest<{
+      Body: Readable;
+      Headers: { 'x-match-id'?: string; 'x-video-filename'?: string; 'x-title'?: string };
+    }>,
+    reply: FastifyReply,
+  ): Promise<void> {
+    let fileName: string;
+    try {
+      fileName = decodeURIComponent(request.headers['x-video-filename'] ?? '');
+    } catch {
+      await reply.status(400).send({ message: 'x-video-filename must be URL encoded.' });
+      return;
+    }
+
+    const extension = fileName.split('.').at(-1)?.toLowerCase();
+    if (!extension || !['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm'].includes(extension)) {
+      await reply.status(415).send({ message: 'Unsupported video format.' });
+      return;
+    }
+
+    const matchId = request.headers['x-match-id'];
+    if (matchId && !isValidUuid(matchId)) {
+      await reply.status(400).send({ message: 'x-match-id must be a valid UUID.' });
+      return;
+    }
+
+    let title: string | undefined;
+    try {
+      title = request.headers['x-title']
+        ? decodeURIComponent(request.headers['x-title'])
+        : undefined;
+    } catch {
+      await reply.status(400).send({ message: 'x-title must be URL encoded.' });
+      return;
+    }
+
+    try {
+      const response = await this.dependencies.processMatchUseCase.executeUpload({
+        fileName,
+        title,
+        matchId,
+        file: request.body,
+      });
+      await reply.status(200).send(response);
+    } catch (error) {
+      if (error instanceof VisionServiceError) {
+        await reply.status(502).send({ message: error.message });
+        return;
+      }
       throw error;
     }
   }
@@ -169,6 +287,28 @@ export class MatchController {
         return;
       }
 
+      throw error;
+    }
+  }
+
+  async getProgress(
+    request: FastifyRequest<{ Params: MatchTelemetryParams }>,
+    reply: FastifyReply,
+  ): Promise<void> {
+    const { matchId } = request.params;
+    if (!isValidUuid(matchId)) {
+      await reply.status(400).send({ message: 'matchId must be a valid UUID.' });
+      return;
+    }
+
+    try {
+      const progress = await this.dependencies.processMatchUseCase.getProgress(matchId);
+      await reply.status(200).send(progress);
+    } catch (error) {
+      if (error instanceof VisionServiceError) {
+        await reply.status(502).send({ message: error.message });
+        return;
+      }
       throw error;
     }
   }

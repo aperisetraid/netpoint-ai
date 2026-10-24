@@ -13,8 +13,19 @@ export async function registerRoutes(
     handler: matchController.processMatch.bind(matchController),
   });
 
+  app.post('/api/v1/matches/upload', {
+    bodyLimit: 1024 * 1024 * 1024,
+    schema: matchController.uploadMatchSchema,
+    handler: matchController.uploadMatch.bind(matchController),
+  });
+
   app.get('/api/v1/matches/:matchId/telemetry', {
     schema: matchController.matchTelemetrySchema,
     handler: matchController.getTelemetry.bind(matchController),
+  });
+
+  app.get('/api/v1/matches/:matchId/progress', {
+    schema: matchController.matchProgressSchema,
+    handler: matchController.getProgress.bind(matchController),
   });
 }

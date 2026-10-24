@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -8,6 +8,7 @@ import numpy as np
 Point = Tuple[int, int]
 Segment = Tuple[int, int, int, int, float]
 Line = Tuple[float, float, float]
+LineCandidate = Tuple[Line, float, float, float, float]
 
 
 class CourtDetector:
@@ -26,7 +27,7 @@ class CourtDetector:
         self.max_line_gap = max_line_gap
 
     def detect_corners(self, frame) -> Optional[List[Point]]:
-        """Detect the four outer court corners in a BGR or grayscale frame."""
+        """Find the strongest plausible court quadrilateral in a video frame."""
         if frame is None or len(frame.shape) < 2:
             return None
 
@@ -56,46 +57,183 @@ class CourtDetector:
 
         height, width = frame.shape[:2]
         segments = self._segments(detected_lines)
-        if len(segments) < 4:
+        baselines = self._line_candidates(segments, width, height, "baseline")
+        left_sides = self._line_candidates(segments, width, height, "left")
+        right_sides = self._line_candidates(segments, width, height, "right")
+        if not baselines:
             return None
 
-        orientations = self._dominant_orientations(segments)
-        if orientations is None:
-            return None
+        side_pair_options = [(left_sides, right_sides)]
+        if len(left_sides) > 1:
+            side_pair_options.append((left_sides, left_sides))
+        if len(right_sides) > 1:
+            side_pair_options.append((right_sides, right_sides))
 
-        angle1, angle2 = orientations
-        angle_tolerance = math.radians(25)
-        first_family = [
-            segment for segment in segments
-            if self._angle_distance(segment[4], angle1) <= angle_tolerance
-        ]
-        second_family = [
-            segment for segment in segments
-            if self._angle_distance(segment[4], angle2) <= angle_tolerance
-        ]
-        cluster_distance = max(10.0, min(width, height) * 0.015)
-        first_lines = self._outer_lines(first_family, angle1, cluster_distance)
-        second_lines = self._outer_lines(second_family, angle2, cluster_distance)
-        if first_lines is None or second_lines is None:
-            return None
+        best_corners = None
+        best_score = float("-inf")
+        for far_baseline in baselines:
+            _, far_support, far_y, _, _ = far_baseline
+            if not height * 0.13 <= far_y <= height * 0.62:
+                continue
+            for near_baseline in baselines:
+                _, near_support, near_y, _, _ = near_baseline
+                if not height * 0.52 <= near_y <= height * 1.04:
+                    continue
+                if near_y - far_y < height * 0.45:
+                    continue
 
-        corners = [
-            self._intersection(first_line, second_line)
-            for first_line in first_lines
-            for second_line in second_lines
-        ]
-        if any(corner is None for corner in corners):
-            return None
+                for first_side_group, second_side_group in side_pair_options:
+                    for first_index, first_side in enumerate(first_side_group):
+                        second_start = (
+                            first_index + 1
+                            if first_side_group is second_side_group
+                            else 0
+                        )
+                        for second_side in second_side_group[second_start:]:
+                            if first_side[0] == second_side[0]:
+                                continue
 
-        points = [corner for corner in corners if corner is not None]
-        top_left = min(points, key=lambda point: point[0] + point[1])
-        bottom_right = max(points, key=lambda point: point[0] + point[1])
-        top_right = min(points, key=lambda point: point[1] - point[0])
-        bottom_left = max(points, key=lambda point: point[1] - point[0])
-        ordered = [top_left, top_right, bottom_right, bottom_left]
-        if len(set(ordered)) != 4:
+                            corners = [
+                                self._intersection(far_baseline[0], first_side[0]),
+                                self._intersection(far_baseline[0], second_side[0]),
+                                self._intersection(near_baseline[0], second_side[0]),
+                                self._intersection(near_baseline[0], first_side[0]),
+                            ]
+                            if any(corner is None for corner in corners):
+                                continue
+                            corner_tolerance = max(width, height) * 0.025
+                            if any(
+                                not self._intersection_on_candidate(corner, candidate, corner_tolerance)
+                                for corner, candidate in (
+                                    (corners[0], first_side),
+                                    (corners[3], first_side),
+                                    (corners[1], second_side),
+                                    (corners[2], second_side),
+                                )
+                            ):
+                                continue
+                            points = np.asarray(corners, dtype=np.float32)
+                            if points[0, 0] > points[1, 0]:
+                                points = points[[1, 0, 3, 2]]
+                            top_left, top_right, bottom_right, bottom_left = points
+                            if top_left[0] >= top_right[0] or bottom_left[0] >= bottom_right[0]:
+                                continue
+                            if any(
+                                point[0] < -width * 0.01
+                                or point[0] > width * 1.01
+                                or point[1] < -height * 0.01
+                                or point[1] > height * 1.01
+                                for point in points
+                            ):
+                                continue
+
+                            far_width = top_right[0] - top_left[0]
+                            near_width = bottom_right[0] - bottom_left[0]
+                            if far_width < width * 0.18 or near_width < width * 0.3:
+                                continue
+                            if not 0.25 <= far_width / near_width <= 1.3:
+                                continue
+                            area = abs(cv2.contourArea(points)) / (width * height)
+                            if not 0.12 <= area <= 0.9 or not cv2.isContourConvex(points):
+                                continue
+
+                            side_support = (first_side[1] + second_side[1]) / 2
+                            score = (
+                                area * 2
+                                + (far_support + near_support) / (2 * width) * 0.3
+                                + side_support / height * 0.3
+                                + (near_y - far_y) / height * 0.3
+                            )
+                            if score > best_score:
+                                best_score = score
+                                best_corners = points
+
+        if best_corners is None:
             return None
-        return [(round(x), round(y)) for x, y in ordered]
+        return [(round(float(x)), round(float(y))) for x, y in best_corners]
+
+    @classmethod
+    def _line_candidates(
+        cls,
+        segments: List[Segment],
+        width: int,
+        height: int,
+        kind: str,
+    ) -> List[LineCandidate]:
+        groups: List[Tuple[float, List[Segment], float]] = []
+        is_baseline = kind == "baseline"
+        cluster_distance = (height if is_baseline else width) * 0.025
+
+        for segment in segments:
+            x1, y1, x2, y2, angle = segment
+            if is_baseline:
+                if cls._angle_distance(angle, 0) > math.radians(14) or x1 == x2:
+                    continue
+                position = y1 + (width / 2 - x1) * (y2 - y1) / (x2 - x1)
+            else:
+                angle_degrees = math.degrees(angle)
+                if kind == "left" and not 98 <= angle_degrees <= 145:
+                    continue
+                if kind == "right" and not 35 <= angle_degrees <= 82:
+                    continue
+                if y1 == y2:
+                    continue
+                position = x1 + (height / 2 - y1) * (x2 - x1) / (y2 - y1)
+
+            segment_length = math.hypot(x2 - x1, y2 - y1)
+            group_index = next(
+                (
+                    index for index, (center, _, _) in enumerate(groups)
+                    if abs(center - position) <= cluster_distance
+                ),
+                None,
+            )
+            if group_index is None:
+                groups.append((position, [segment], segment_length))
+            else:
+                center, group_segments, support = groups[group_index]
+                new_support = support + segment_length
+                groups[group_index] = (
+                    (center * support + position * segment_length) / new_support,
+                    group_segments + [segment],
+                    new_support,
+                )
+
+        minimum_support = max(
+            60,
+            (width if is_baseline else height)
+            * (0.35 if is_baseline else 0.12),
+        )
+        candidates: List[LineCandidate] = []
+        for position, group_segments, support in groups:
+            if support < minimum_support:
+                continue
+            points = np.asarray(
+                [
+                    (x, y)
+                    for x1, y1, x2, y2, _ in group_segments
+                    for x, y in ((x1, y1), (x2, y2))
+                ],
+                dtype=np.float32,
+            )
+            vx, vy, x, y = (
+                float(value)
+                for value in cv2.fitLine(points, cv2.DIST_WELSCH, 0, 0.01, 0.01).flatten()
+            )
+            line = (-vy, vx, -vy * x + vx * y)
+            projections = points[:, 0] * vx + points[:, 1] * vy
+            candidates.append((line, support, position, float(projections.min()), float(projections.max())))
+        return candidates
+
+    @staticmethod
+    def _intersection_on_candidate(
+        point: Tuple[float, float],
+        candidate: LineCandidate,
+        tolerance: float,
+    ) -> bool:
+        line, _, _, minimum_projection, maximum_projection = candidate
+        projection = line[1] * point[0] - line[0] * point[1]
+        return minimum_projection - tolerance <= projection <= maximum_projection + tolerance
 
     @staticmethod
     def _segments(detected_lines) -> List[Segment]:
@@ -113,102 +251,6 @@ class CourtDetector:
     def _angle_distance(first: float, second: float) -> float:
         difference = abs(first - second) % math.pi
         return min(difference, math.pi - difference)
-
-    @classmethod
-    def _dominant_orientations(
-        cls,
-        segments: List[Segment],
-    ) -> Optional[Tuple[float, float]]:
-        bin_count = 36
-        histogram = [0.0] * bin_count
-        for x1, y1, x2, y2, angle in segments:
-            bin_index = int(angle / math.pi * bin_count) % bin_count
-            histogram[bin_index] += math.hypot(x2 - x1, y2 - y1)
-
-        first_index = max(range(bin_count), key=histogram.__getitem__)
-        minimum_separation = round(bin_count / 6)
-        second_candidates = [
-            index for index in range(bin_count)
-            if min(
-                abs(index - first_index),
-                bin_count - abs(index - first_index),
-            ) >= minimum_separation
-        ]
-        if not second_candidates:
-            return None
-        second_index = max(second_candidates, key=histogram.__getitem__)
-        if histogram[first_index] == 0 or histogram[second_index] == 0:
-            return None
-
-        return (
-            (first_index + 0.5) * math.pi / bin_count,
-            (second_index + 0.5) * math.pi / bin_count,
-        )
-
-    @staticmethod
-    def _outer_lines(
-        segments: List[Segment],
-        orientation: float,
-        cluster_distance: float,
-    ) -> Optional[Tuple[Line, Line]]:
-        normal_x = -math.sin(orientation)
-        normal_y = math.cos(orientation)
-        clusters: List[Dict[str, object]] = []
-
-        for x1, y1, x2, y2, angle in segments:
-            midpoint_x = (x1 + x2) / 2
-            midpoint_y = (y1 + y2) / 2
-            offset = midpoint_x * normal_x + midpoint_y * normal_y
-            length = math.hypot(x2 - x1, y2 - y1)
-            cluster = next(
-                (
-                    candidate for candidate in clusters
-                    if abs(float(candidate["offset"]) - offset) <= cluster_distance
-                ),
-                None,
-            )
-            if cluster is None:
-                clusters.append({
-                    "offset": offset,
-                    "segments": [(x1, y1, x2, y2, angle, length)],
-                })
-            else:
-                cluster["segments"].append((x1, y1, x2, y2, angle, length))
-                cluster_segments = cluster["segments"]
-                total_length = sum(segment[5] for segment in cluster_segments)
-                cluster["offset"] = sum(
-                    (
-                        (segment[0] + segment[2]) / 2 * normal_x
-                        + (segment[1] + segment[3]) / 2 * normal_y
-                    ) * segment[5]
-                    for segment in cluster_segments
-                ) / total_length
-
-        if len(clusters) < 2:
-            return None
-
-        clusters.sort(key=lambda cluster: float(cluster["offset"]))
-        return (
-            CourtDetector._representative_line(clusters[0]["segments"]),
-            CourtDetector._representative_line(clusters[-1]["segments"]),
-        )
-
-    @staticmethod
-    def _representative_line(segments) -> Line:
-        weighted_cosine = sum(length * math.cos(2 * angle) for *_, angle, length in segments)
-        weighted_sine = sum(length * math.sin(2 * angle) for *_, angle, length in segments)
-        angle = (0.5 * math.atan2(weighted_sine, weighted_cosine)) % math.pi
-        normal_x = -math.sin(angle)
-        normal_y = math.cos(angle)
-        total_length = sum(segment[5] for segment in segments)
-        offset = sum(
-            (
-                (segment[0] + segment[2]) / 2 * normal_x
-                + (segment[1] + segment[3]) / 2 * normal_y
-            ) * segment[5]
-            for segment in segments
-        ) / total_length
-        return normal_x, normal_y, offset
 
     @staticmethod
     def _intersection(first: Line, second: Line) -> Optional[Tuple[float, float]]:
