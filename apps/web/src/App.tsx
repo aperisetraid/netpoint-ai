@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  ChartNoAxesCombined,
   CheckCircle2,
   Moon,
   Radar,
@@ -9,6 +10,7 @@ import {
   Sun,
   Upload,
   Video,
+  X,
 } from 'lucide-react'
 
 import {
@@ -20,6 +22,7 @@ import {
   processMatch,
   uploadMatchVideo,
 } from './services/api'
+import { detectBounces, type Bounce } from './bounceDetection'
 import './App.css'
 
 interface YouTubePlayer {
@@ -61,6 +64,8 @@ interface AnalysisResult {
 
 interface CourtVisualizationProps {
   frame?: FrameTelemetry
+  bounces: Bounce[]
+  playerNames: { far: string; near: string }
 }
 
 interface VideoPlayerProps {
@@ -365,8 +370,6 @@ function FrameInspector({ analysis, frame, isPlaying }: {
       )}
       {analysis && frame && !isPlaying ? (
         <div className="frame-inspector__status">
-          <span>{frame.court_corners?.length === 4 ? 'Pista calibrada' : 'Pista sin calibrar'}</span>
-          <span>{frame.detections.length ? `${frame.detections.length} detecciones` : 'Sin detecciones'}</span>
           {frame.detections.some((detection) => detection.carried_forward) ? <span>Posiciones previas en línea discontinua</span> : null}
         </div>
       ) : null}
@@ -374,24 +377,14 @@ function FrameInspector({ analysis, frame, isPlaying }: {
   )
 }
 
-function CourtVisualization({ frame }: CourtVisualizationProps) {
+function CourtVisualization({ frame, bounces, playerNames }: CourtVisualizationProps) {
   const positionedDetections = frame?.detections.filter(
     (detection) => detection.x_meters !== null && detection.y_meters !== null,
   ) ?? []
-  const pointXs = positionedDetections.map(
-    (detection) => ((detection.y_meters ?? 0) / courtWidth) * 1097,
-  )
-  const viewLeft = Math.min(0, ...pointXs.map((pointX) => pointX - 80))
-  const viewRight = Math.max(1097, ...pointXs.map((pointX) => pointX + 80))
-  const pointYs = positionedDetections.map(
-    (detection) => ((detection.x_meters ?? 0) / courtLength) * 2377,
-  )
-  const viewTop = Math.min(-50, ...pointYs.map((pointY) => pointY - 80))
-  const viewBottom = Math.max(2427, ...pointYs.map((pointY) => pointY + 80))
 
   return (
     <svg
-      viewBox={`${viewLeft} ${viewTop} ${viewRight - viewLeft} ${viewBottom - viewTop}`}
+      viewBox="-60 -80 1217 2537"
       className="court-map__svg"
       preserveAspectRatio="xMidYMid meet"
       role="img"
@@ -409,20 +402,31 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
       <line x1="161" y1="655" x2="936" y2="655" className="court-line court-line--soft" />
       <line x1="161" y1="1722" x2="936" y2="1722" className="court-line court-line--soft" />
       <line x1="548.5" y1="655" x2="548.5" y2="1722" className="court-line court-line--soft" />
-      <text x="548.5" y="-6" textAnchor="middle" className="court-orientation-label">FONDO</text>
-      <text x="548.5" y="2398" textAnchor="middle" className="court-orientation-label">CÁMARA</text>
 
-      {positionedDetections.map((detection, index) => {
-        const pointX = ((detection.y_meters ?? 0) / courtWidth) * 1097
-        const pointY = ((detection.x_meters ?? 0) / courtLength) * 2377
-        const className = detection.class === 'player' ? 'player' : 'ball'
-        const markerLabel = className === 'player'
-          ? `P${positionedDetections.slice(0, index + 1).filter((item) => item.class === 'player').length}`
-          : 'B'
+      {bounces.map((bounce, index) => {
+        const pointX = (bounce.y / courtWidth) * 1097
+        const pointY = (bounce.x / courtLength) * 2377
+        const side = bounce.x < courtLength / 2 ? 'far' : 'near'
+        return (
+          <g key={`${bounce.timestamp}-${index}`} className={`court-bounce court-bounce--${side}`}>
+            <circle cx={pointX} cy={pointY} r="62" className="court-bounce__marker" />
+            <text x={pointX} y={pointY + 13} textAnchor="middle" className="court-bounce__label"
+              style={{ fontSize: `${Math.min(54, 140 / String(index + 1).length)}px` }}>{index + 1}</text>
+          </g>
+        )
+      })}
+
+      {positionedDetections.filter((detection) => detection.class === 'player').map((detection, index) => {
+        const playerX = Math.max(0, Math.min(courtLength, detection.x_meters ?? 0))
+        const playerY = Math.max(0, Math.min(courtWidth, detection.y_meters ?? 0))
+        const pointX = (playerY / courtWidth) * 1097
+        const pointY = (playerX / courtLength) * 2377
+        const playerName = playerX < courtLength / 2 ? playerNames.far : playerNames.near
+        const markerLabel = Array.from(playerName.trim())[0]?.toLocaleUpperCase('es-ES') ?? '?'
 
         return (
           <g key={`${frame?.frame_index}-${detection.class}-${index}`}>
-            <circle cx={pointX} cy={pointY} r={className === 'player' ? 34 : 24} className={`court-marker court-marker--${className}`} />
+            <circle cx={pointX} cy={pointY} r="46" className="court-marker court-marker--player" />
             <text x={pointX} y={pointY + 7} textAnchor="middle" className="court-marker-label">
               {markerLabel}
             </text>
@@ -442,6 +446,9 @@ function App() {
   const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
   const [localPreviewUrl, setLocalPreviewUrl] = useState('')
   const [title, setTitle] = useState('')
+  const [playerNames, setPlayerNames] = useState({ far: '', near: '' })
+  const [isPlayerDialogOpen, setIsPlayerDialogOpen] = useState(false)
+  const [playerDialogError, setPlayerDialogError] = useState('')
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -452,6 +459,7 @@ function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const playerDialogRef = useRef<HTMLDialogElement>(null)
   const previewUrlRef = useRef('')
   const requestSequenceRef = useRef(0)
 
@@ -465,7 +473,15 @@ function App() {
     window.localStorage.setItem('netpoint-theme', theme)
   }, [theme])
 
+  useEffect(() => {
+    const dialog = playerDialogRef.current
+    if (!dialog) return
+    if (isPlayerDialogOpen && !dialog.open) dialog.showModal()
+    if (!isPlayerDialogOpen && dialog.open) dialog.close()
+  }, [isPlayerDialogOpen])
+
   const frames = analysis?.telemetry ?? []
+  const bounces = useMemo(() => detectBounces(analysis?.telemetry ?? []), [analysis])
   const currentFrame = frames.reduce<FrameTelemetry | undefined>(
     (selectedFrame, frame) =>
       frame.timestamp_seconds <= currentTime ? frame : selectedFrame,
@@ -473,9 +489,7 @@ function App() {
   )
   const currentDetections = currentFrame?.detections ?? []
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
+  async function startAnalysis() {
     if (isSubmitting) {
       return
     }
@@ -550,12 +564,92 @@ function App() {
     }
   }
 
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (isSubmitting) return
+    setPlayerDialogError('')
+    setIsPlayerDialogOpen(true)
+  }
+
+  function handlePlayerNamesSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const names = { far: playerNames.far.trim(), near: playerNames.near.trim() }
+    if (!names.far || !names.near) {
+      setPlayerDialogError('Escribe el nombre de ambos jugadores.')
+      return
+    }
+    setPlayerNames(names)
+    setPlayerDialogError('')
+    setIsPlayerDialogOpen(false)
+    void startAnalysis()
+  }
+
   return (
     <main className="app-shell" data-theme={theme}>
+      <dialog
+        ref={playerDialogRef}
+        className="player-dialog"
+        aria-labelledby="player-dialog-title"
+        onCancel={(event) => {
+          event.preventDefault()
+          setIsPlayerDialogOpen(false)
+        }}
+      >
+        <form className="player-dialog__form" onSubmit={handlePlayerNamesSubmit}>
+          <div className="player-dialog__header">
+            <div className="player-dialog__mark" aria-hidden="true">NP</div>
+            <button
+              className="player-dialog__close"
+              type="button"
+              aria-label="Cerrar"
+              title="Cerrar"
+              onClick={() => setIsPlayerDialogOpen(false)}
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <span className="eyebrow">IDENTIFICACIÓN DE JUGADORES</span>
+          <h2 id="player-dialog-title">¿Quién juega cada lado?</h2>
+          <p className="player-dialog__description">Sus iniciales aparecerán en el mapa de pista.</p>
+          <label className="player-dialog__field">
+            <span><b>F</b> Fondo <small>Lado opuesto a la cámara</small></span>
+            <input
+              autoFocus
+              required
+              maxLength={80}
+              type="text"
+              autoComplete="name"
+              placeholder="Nombre del jugador"
+              value={playerNames.far}
+              onChange={(event) => setPlayerNames({ ...playerNames, far: event.target.value })}
+            />
+          </label>
+          <label className="player-dialog__field">
+            <span><b>C</b> Cámara <small>Lado más cercano</small></span>
+            <input
+              required
+              maxLength={80}
+              type="text"
+              autoComplete="name"
+              placeholder="Nombre del jugador"
+              value={playerNames.near}
+              onChange={(event) => setPlayerNames({ ...playerNames, near: event.target.value })}
+            />
+          </label>
+          {playerDialogError ? <p className="player-dialog__error" role="alert">{playerDialogError}</p> : null}
+          <div className="player-dialog__actions">
+            <button className="player-dialog__cancel" type="button" onClick={() => setIsPlayerDialogOpen(false)}>
+              Ahora no
+            </button>
+            <button className="player-dialog__confirm" type="submit">
+              Guardar y analizar <Video size={16} />
+            </button>
+          </div>
+        </form>
+      </dialog>
       <div className="app-layout">
         <header className="workspace-header">
           <div className="workspace-brand">
-            <span className="workspace-brand__mark">NP</span>
             <span>NETPOINT <strong>AI</strong></span>
           </div>
           <div className="workspace-title">
@@ -721,53 +815,60 @@ function App() {
         </section>
 
         <section className="analysis-grid" aria-label="Revisión del partido">
-          <div className="analysis-primary">
+          <section className="workspace-panel court-panel analysis-panel--map">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">COORDENADAS MÉTRICAS</span>
+                <h2>Mapa de pista</h2>
+              </div>
+              <span className="panel-timestamp">
+                {currentFrame ? `#${currentFrame.frame_index} · ${formatTime(currentFrame.timestamp_seconds)}` : '--'}
+              </span>
+            </div>
+            <div className="court-map-stage">
+              {analysis ? (
+                <CourtVisualization frame={currentFrame} bounces={bounces} playerNames={playerNames} />
+              ) : (
+                <div className="court-map-empty">
+                  <Radar size={22} />
+                  <span>El mapa aparecerá al procesar un partido</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="workspace-panel source-panel analysis-panel--video">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">REPRODUCCIÓN</span>
+                <h2>Video fuente</h2>
+              </div>
+              {analysis?.title ? <span className="source-title">{analysis.title}</span> : null}
+            </div>
+            <VideoPlayer
+              sourceUrl={analysis?.sourceUrl ?? ''}
+              onTimeChange={setCurrentTime}
+              onPlaybackChange={setIsVideoPlaying}
+            />
+          </section>
+
+          <div className="analysis-panel--frames">
             <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
           </div>
 
-          <aside className="analysis-rail">
-            <section className="workspace-panel court-panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">COORDENADAS MÉTRICAS</span>
-                  <h2>Mapa de pista</h2>
-                </div>
-                <span className="panel-timestamp">
-                  {currentFrame ? `#${currentFrame.frame_index} · ${formatTime(currentFrame.timestamp_seconds)}` : '--'}
-                </span>
+          <section className="workspace-panel stats-panel analysis-panel--stats" aria-label="Estadísticas del partido">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">PARTIDO</span>
+                <h2>Estadísticas</h2>
               </div>
-              <div className="court-map-stage">
-                {analysis ? (
-                  <CourtVisualization frame={currentFrame} />
-                ) : (
-                  <div className="court-map-empty">
-                    <Radar size={22} />
-                    <span>El mapa aparecerá al procesar un partido</span>
-                  </div>
-                )}
-              </div>
-              <div className="map-legend" aria-label="Leyenda del mapa">
-                <span><i className="map-legend__dot map-legend__dot--player" /> Jugadores</span>
-                <span><i className="map-legend__dot map-legend__dot--ball" /> Pelota</span>
-                <span className="map-legend__orientation">Fondo arriba · cámara abajo</span>
-              </div>
-            </section>
-
-            <section className="workspace-panel source-panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">REPRODUCCIÓN</span>
-                  <h2>Video fuente</h2>
-                </div>
-                {analysis?.title ? <span className="source-title">{analysis.title}</span> : null}
-              </div>
-              <VideoPlayer
-                sourceUrl={analysis?.sourceUrl ?? ''}
-                onTimeChange={setCurrentTime}
-                onPlaybackChange={setIsVideoPlaying}
-              />
-            </section>
-          </aside>
+            </div>
+            <div className="stats-coming-soon">
+              <ChartNoAxesCombined size={28} strokeWidth={1.5} />
+              <strong>COMING SOON</strong>
+              <span>Resumen y métricas del partido</span>
+            </div>
+          </section>
         </section>
       </div>
     </main>

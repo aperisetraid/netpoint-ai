@@ -288,6 +288,23 @@ class FrameInspectionTests(unittest.TestCase):
         self.assertFalse(player_within_tracking_region(-0.17, -2.34, 0.3))
         self.assertFalse(player_within_tracking_region(-0.17, -3.1, 0.9))
 
+    def test_player_outside_sideline_at_midcourt_is_rejected(self):
+        self.assertFalse(player_within_tracking_region(11.57, -1.02, 0.9))
+
+    def test_color_ball_fallback_detects_mint_ball_on_blue_court(self):
+        previous = np.full((240, 320, 3), (160, 90, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.circle(previous, (140, 100), 4, (215, 255, 199), -1)
+        cv2.circle(frame, (160, 100), 4, (215, 255, 199), -1)
+
+        candidate = detect_tennis_ball_color(frame, court, previous)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+        self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 100, delta=3)
+
     def test_color_ball_fallback_rejects_candidate_just_outside_court(self):
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         court = [(40, 20), (280, 20), (280, 220), (40, 220)]

@@ -19,6 +19,7 @@ CALIBRATION_RETRY_INTERVAL = 5
 PLAYER_BASELINE_MARGIN_METERS = 5.0
 PLAYER_SIDELINE_MARGIN_METERS = 3.0
 PLAYER_OFF_COURT_MIN_CONFIDENCE = 0.4
+PLAYER_SIDELINE_BASELINE_ZONE_METERS = 2.0
 PLAYER_MIN_CONFIDENCE = 0.2
 PLAYER_SIDELINE_EDGE_MARGIN_METERS = 0.5
 PLAYER_SIDELINE_EDGE_MIN_CONFIDENCE = 0.3
@@ -126,9 +127,14 @@ def player_within_tracking_region(
         return False
     if not -PLAYER_SIDELINE_MARGIN_METERS <= y_meters <= COURT_WIDTH_METERS + PLAYER_SIDELINE_MARGIN_METERS:
         return False
+    if 0 <= y_meters <= COURT_WIDTH_METERS:
+        return True
     return (
-        0 <= y_meters <= COURT_WIDTH_METERS
-        or confidence >= PLAYER_OFF_COURT_MIN_CONFIDENCE
+        confidence >= PLAYER_OFF_COURT_MIN_CONFIDENCE
+        and (
+            x_meters <= PLAYER_SIDELINE_BASELINE_ZONE_METERS
+            or x_meters >= COURT_LENGTH_METERS - PLAYER_SIDELINE_BASELINE_ZONE_METERS
+        )
     )
 
 
@@ -143,8 +149,8 @@ def detect_tennis_ball_color(
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
         hsv,
-        np.asarray((18, 55, 175), dtype=np.uint8),
-        np.asarray((42, 255, 255), dtype=np.uint8),
+        np.asarray((18, 35, 175), dtype=np.uint8),
+        np.asarray((96, 255, 255), dtype=np.uint8),
     )
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     frame_area = frame.shape[0] * frame.shape[1]
