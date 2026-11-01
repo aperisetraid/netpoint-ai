@@ -9,7 +9,13 @@ import cv2
 import numpy as np
 
 import server
-from tracker import TennisTracker, detect_tennis_ball_color
+from tracker import (
+    TennisTracker,
+    ball_candidate_near_player,
+    detect_tennis_ball_color,
+    point_in_ball_tracking_region,
+    player_within_tracking_region,
+)
 
 
 class FrameInspectionTests(unittest.TestCase):
@@ -248,6 +254,40 @@ class FrameInspectionTests(unittest.TestCase):
 
         self.assertIsNone(detect_tennis_ball_color(frame, court))
 
+    def test_color_ball_fallback_detects_motion_blurred_ball(self):
+        frame = np.full((240, 320, 3), (40, 120, 40), dtype=np.uint8)
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.ellipse(frame, (160, 100), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+
+        candidate = detect_tennis_ball_color(frame, court)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+        self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 100, delta=3)
+
+    def test_color_ball_fallback_detects_fast_vertical_blur(self):
+        previous = np.full((1000, 1000, 3), (40, 120, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(30, 100), (970, 100), (970, 900), (30, 900)]
+        cv2.ellipse(previous, (140, 80), (2, 15), 0, 0, 360, (0, 200, 200), -1)
+        cv2.ellipse(frame, (160, 80), (2, 15), 0, 0, 360, (0, 200, 200), -1)
+        previous = cv2.GaussianBlur(previous, (3, 3), 0)
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+
+        candidate = detect_tennis_ball_color(frame, court, previous)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+        self.assertGreater((bbox[3] - bbox[1]) / (bbox[2] - bbox[0]), 5)
+
+    def test_player_inside_sideline_margin_is_kept_with_strong_confidence(self):
+        self.assertTrue(player_within_tracking_region(-0.17, -2.34, 0.746))
+        self.assertFalse(player_within_tracking_region(-0.17, -2.34, 0.3))
+        self.assertFalse(player_within_tracking_region(-0.17, -3.1, 0.9))
+
     def test_color_ball_fallback_rejects_candidate_just_outside_court(self):
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         court = [(40, 20), (280, 20), (280, 220), (40, 220)]
@@ -259,6 +299,134 @@ class FrameInspectionTests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         bbox, _ = candidate
         self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+
+    def test_color_ball_fallback_prefers_moving_ball_beyond_baseline(self):
+        previous = np.full((240, 320, 3), (40, 120, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.circle(previous, (240, 100), 3, (0, 255, 255), -1)
+        cv2.circle(frame, (239, 100), 3, (0, 255, 255), -1)
+        cv2.ellipse(previous, (150, 9), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+        cv2.ellipse(frame, (160, 9), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+
+        candidate = detect_tennis_ball_color(
+            frame,
+            court,
+            previous,
+            [[170.0, 0.0, 190.0, 20.0]],
+        )
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+
+    def test_color_ball_fallback_finds_small_ball_outside_baseline_near_player(self):
+        previous = np.full((400, 320, 3), (40, 120, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(20, 100), (300, 100), (300, 350), (20, 350)]
+        cv2.circle(previous, (240, 200), 4, (0, 255, 255), -1)
+        cv2.circle(frame, (240, 200), 4, (0, 255, 255), -1)
+        cv2.ellipse(previous, (150, 35), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+        cv2.ellipse(frame, (160, 35), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+        previous = cv2.GaussianBlur(previous, (3, 3), 0)
+        player_boxes = [[170.0, 10.0, 200.0, 70.0]]
+
+        candidate = detect_tennis_ball_color(frame, court, previous, player_boxes)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+        self.assertAlmostEqual(center[0], 160, delta=3)
+        self.assertAlmostEqual(center[1], 35, delta=3)
+        self.assertTrue(point_in_ball_tracking_region(center, court))
+
+    def test_color_ball_fallback_keeps_tiny_moving_ball_over_static_net_color(self):
+        previous = np.full((1080, 1920, 3), (40, 120, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(550, 333), (1400, 340), (1748, 884), (224, 880)]
+        cv2.ellipse(previous, (1370, 724), (1, 2), 0, 0, 360, (0, 255, 255), -1)
+        cv2.ellipse(frame, (1380, 724), (1, 2), 0, 0, 360, (0, 255, 255), -1)
+        cv2.circle(previous, (1339, 462), 3, (0, 255, 255), -1)
+        cv2.circle(frame, (1339, 462), 3, (0, 255, 255), -1)
+        player_boxes = [[1263.0, 769.0, 1410.0, 1043.0]]
+
+        candidate = detect_tennis_ball_color(frame, court, previous, player_boxes)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 1380, delta=3)
+        self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 724, delta=3)
+
+    def test_color_ball_fallback_prefers_player_proximity_over_net_reflection(self):
+        previous = np.full((600, 800, 3), (40, 120, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(20, 20), (780, 20), (780, 580), (20, 580)]
+        cv2.ellipse(previous, (140, 180), (2, 8), 0, 0, 360, (0, 255, 255), -1)
+        cv2.ellipse(frame, (160, 180), (2, 8), 0, 0, 360, (0, 255, 255), -1)
+        cv2.circle(previous, (250, 260), 4, (0, 255, 255), -1)
+        cv2.circle(frame, (245, 260), 4, (0, 255, 255), -1)
+        player_boxes = [[140.0, 205.0, 175.0, 300.0]]
+        previous_net_reflection = [246.0, 256.0, 255.0, 265.0]
+
+        candidate = detect_tennis_ball_color(
+            frame,
+            court,
+            previous,
+            player_boxes,
+            previous_net_reflection,
+        )
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+        self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 180, delta=3)
+
+    def test_color_ball_fallback_rejects_long_yellow_line(self):
+        frame = np.full((240, 320, 3), (40, 120, 40), dtype=np.uint8)
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.line(frame, (100, 100), (160, 100), (0, 255, 255), 2)
+
+        self.assertIsNone(detect_tennis_ball_color(frame, court))
+
+    def test_color_ball_fallback_requires_motion_when_previous_frame_is_available(self):
+        previous = np.full((240, 320, 3), (40, 120, 40), dtype=np.uint8)
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        frame = previous.copy()
+        cv2.ellipse(frame, (160, 100), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+        cv2.circle(previous, (100, 100), 4, (0, 255, 255), -1)
+        cv2.circle(frame, (100, 100), 4, (0, 255, 255), -1)
+
+        candidate = detect_tennis_ball_color(frame, court, previous)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
+        self.assertIsNone(detect_tennis_ball_color(previous, court, previous))
+
+    def test_ball_candidate_near_player_is_rejected(self):
+        player = [930.0, 739.0, 1131.9, 959.0]
+        false_ball = [1122.9, 801.8, 1146.2, 827.2]
+        real_ball = [1438.0, 706.0, 1451.0, 714.0]
+
+        self.assertTrue(ball_candidate_near_player(false_ball, [player]))
+        self.assertFalse(ball_candidate_near_player(real_ball, [player]))
+
+    def test_color_ball_fallback_skips_player_and_selects_ball(self):
+        previous = np.full((240, 320, 3), (40, 120, 40), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.circle(frame, (126, 100), 4, (0, 255, 255), -1)
+        cv2.ellipse(frame, (230, 100), (7, 2), 0, 0, 360, (145, 190, 210), -1)
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+        player_boxes = [[90.0, 70.0, 130.0, 160.0]]
+
+        candidate = detect_tennis_ball_color(frame, court, previous, player_boxes)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 230, delta=3)
 
     def test_completed_analysis_registers_its_own_video(self):
         telemetry = [{"frame_index": 0}]
