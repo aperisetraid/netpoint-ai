@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
+  Moon,
   Radar,
   RefreshCw,
   Link2,
+  Sun,
   Upload,
   Video,
 } from 'lucide-react'
@@ -378,32 +379,42 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
     (detection) => detection.x_meters !== null && detection.y_meters !== null,
   ) ?? []
   const pointXs = positionedDetections.map(
-    (detection) => ((detection.x_meters ?? 0) / courtLength) * 2377,
+    (detection) => ((detection.y_meters ?? 0) / courtWidth) * 1097,
   )
   const viewLeft = Math.min(0, ...pointXs.map((pointX) => pointX - 80))
-  const viewRight = Math.max(2377, ...pointXs.map((pointX) => pointX + 80))
+  const viewRight = Math.max(1097, ...pointXs.map((pointX) => pointX + 80))
+  const pointYs = positionedDetections.map(
+    (detection) => ((detection.x_meters ?? 0) / courtLength) * 2377,
+  )
+  const viewTop = Math.min(-50, ...pointYs.map((pointY) => pointY - 80))
+  const viewBottom = Math.max(2427, ...pointYs.map((pointY) => pointY + 80))
 
   return (
     <svg
-      viewBox={`${viewLeft} 0 ${viewRight - viewLeft} 1097`}
-      className="h-full w-full"
+      viewBox={`${viewLeft} ${viewTop} ${viewRight - viewLeft} ${viewBottom - viewTop}`}
+      className="court-map__svg"
+      preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label={`Posiciones del frame ${frame?.frame_index ?? 0} sobre una pista de tenis`}
+      aria-label={`Mapa vertical de la pista y posiciones del frame ${frame?.frame_index ?? 0}`}
     >
-      <rect x="8" y="8" width="2361" height="1081" rx="36" className="court-frame" />
-      <rect x="32" y="32" width="2313" height="1033" rx="20" className="court-surface" />
-      <line x1="1188.5" y1="32" x2="1188.5" y2="1065" className="court-line court-line--net" />
-      <line x1="32" y1="32" x2="2345" y2="32" className="court-line" />
-      <line x1="32" y1="1065" x2="2345" y2="1065" className="court-line" />
-      <line x1="32" y1="169" x2="2345" y2="169" className="court-line court-line--soft" />
-      <line x1="32" y1="928" x2="2345" y2="928" className="court-line court-line--soft" />
-      <line x1="672" y1="169" x2="672" y2="928" className="court-line court-line--soft" />
-      <line x1="1705" y1="169" x2="1705" y2="928" className="court-line court-line--soft" />
-      <line x1="672" y1="548.5" x2="1705" y2="548.5" className="court-line court-line--soft" />
+      <rect x="8" y="8" width="1081" height="2361" rx="26" className="court-frame" />
+      <rect x="32" y="32" width="1033" height="2313" rx="14" className="court-surface" />
+      <line x1="32" y1="1188.5" x2="1065" y2="1188.5" className="court-line court-line--net" />
+      <line x1="32" y1="32" x2="1065" y2="32" className="court-line" />
+      <line x1="32" y1="2345" x2="1065" y2="2345" className="court-line" />
+      <line x1="32" y1="655" x2="1065" y2="655" className="court-line court-line--soft" />
+      <line x1="32" y1="1722" x2="1065" y2="1722" className="court-line court-line--soft" />
+      <line x1="161" y1="32" x2="161" y2="2345" className="court-line court-line--soft" />
+      <line x1="936" y1="32" x2="936" y2="2345" className="court-line court-line--soft" />
+      <line x1="161" y1="655" x2="936" y2="655" className="court-line court-line--soft" />
+      <line x1="161" y1="1722" x2="936" y2="1722" className="court-line court-line--soft" />
+      <line x1="548.5" y1="655" x2="548.5" y2="1722" className="court-line court-line--soft" />
+      <text x="548.5" y="-6" textAnchor="middle" className="court-orientation-label">FONDO</text>
+      <text x="548.5" y="2398" textAnchor="middle" className="court-orientation-label">CÁMARA</text>
 
       {positionedDetections.map((detection, index) => {
-        const pointX = ((detection.x_meters ?? 0) / courtLength) * 2377
-        const pointY = ((detection.y_meters ?? 0) / courtWidth) * 1097
+        const pointX = ((detection.y_meters ?? 0) / courtWidth) * 1097
+        const pointY = ((detection.x_meters ?? 0) / courtLength) * 2377
         const className = detection.class === 'player' ? 'player' : 'ball'
         const markerLabel = className === 'player'
           ? `P${positionedDetections.slice(0, index + 1).filter((item) => item.class === 'player').length}`
@@ -411,7 +422,7 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
 
         return (
           <g key={`${frame?.frame_index}-${detection.class}-${index}`}>
-            <circle cx={pointX} cy={pointY} r={className === 'player' ? 28 : 19} className={`court-marker court-marker--${className}`} />
+            <circle cx={pointX} cy={pointY} r={className === 'player' ? 34 : 24} className={`court-marker court-marker--${className}`} />
             <text x={pointX} y={pointY + 7} textAnchor="middle" className="court-marker-label">
               {markerLabel}
             </text>
@@ -423,6 +434,9 @@ function CourtVisualization({ frame }: CourtVisualizationProps) {
 }
 
 function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() =>
+    window.localStorage.getItem('netpoint-theme') === 'light' ? 'light' : 'dark',
+  )
   const [sourceUrl, setSourceUrl] = useState('')
   const [inputMode, setInputMode] = useState<'url' | 'file'>('url')
   const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
@@ -446,6 +460,10 @@ function App() {
       URL.revokeObjectURL(previewUrlRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('netpoint-theme', theme)
+  }, [theme])
 
   const frames = analysis?.telemetry ?? []
   const currentFrame = frames.reduce<FrameTelemetry | undefined>(
@@ -533,261 +551,223 @@ function App() {
   }
 
   return (
-    <main className="app-shell min-h-screen bg-(--color-bg) text-(--color-foreground)">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
-        <header className="panel-surface grid gap-4 rounded-[28px] border border-white/10 px-5 py-5 shadow-2xl shadow-black/30 sm:px-8 sm:py-7 lg:grid-cols-[1.4fr_0.9fr]">
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3 text-[0.72rem] font-semibold uppercase tracking-[0.28em] text-lime-300/85">
-              <span className="rounded-full border border-lime-400/30 bg-lime-400/10 px-3 py-1">NetPoint AI</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/60">
-                Tracking por fotograma
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              <h1 className="max-w-3xl text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl lg:text-[3.1rem]">
-                Panel operativo para procesar partidos y revisar posiciones en pista.
-              </h1>
-              <p className="max-w-2xl text-sm leading-6 text-white/70 sm:text-base">
-                Reproduce el video y sigue la posición de jugadores y pelota en coordenadas métricas.
-              </p>
-            </div>
+    <main className="app-shell" data-theme={theme}>
+      <div className="app-layout">
+        <header className="workspace-header">
+          <div className="workspace-brand">
+            <span className="workspace-brand__mark">NP</span>
+            <span>NETPOINT <strong>AI</strong></span>
           </div>
-
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            <article className="rounded-3xl border border-white/8 bg-black/20 p-4">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-white/45">
-                <Activity className="h-4 w-4 text-lime-300" />
-                Estado
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">
-                {analysis ? 'Procesado' : isSubmitting ? 'Ejecutando' : 'En espera'}
-              </p>
-            </article>
-            <article className="rounded-3xl border border-white/8 bg-black/20 p-4">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-white/45">
-                <Radar className="h-4 w-4 text-lime-300" />
-                Fotogramas
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">
-                {analysis ? frames.length : '00'}
-              </p>
-            </article>
-            <article className="rounded-3xl border border-white/8 bg-black/20 p-4">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-white/45">
-                <Activity className="h-4 w-4 text-lime-300" />
-                Detecciones actuales
-              </div>
-              <p className="mt-3 text-2xl font-semibold text-white">
-                {analysis ? currentDetections.length : '--'}
-              </p>
-            </article>
+          <div className="workspace-title">
+            <span className="eyebrow">ANÁLISIS DE PARTIDO</span>
+            <h1>{analysis?.title ?? 'Centro de análisis'}</h1>
+          </div>
+          <div className="theme-toggle" role="group" aria-label="Tema de la interfaz">
+            <button
+              type="button"
+              aria-label="Modo claro"
+              aria-pressed={theme === 'light'}
+              title="Modo claro"
+              onClick={() => setTheme('light')}
+            >
+              <Sun size={17} />
+            </button>
+            <button
+              type="button"
+              aria-label="Modo oscuro"
+              aria-pressed={theme === 'dark'}
+              title="Modo oscuro"
+              onClick={() => setTheme('dark')}
+            >
+              <Moon size={17} />
+            </button>
+          </div>
+          <div className="workspace-stats">
+            <div className="workspace-stat">
+              <span className="workspace-stat__label">Estado</span>
+              <strong className={isSubmitting ? 'is-live' : ''}>
+                {analysis ? 'Procesado' : isSubmitting ? 'En curso' : 'En espera'}
+              </strong>
+            </div>
+            <div className="workspace-stat">
+              <span className="workspace-stat__label">Frames</span>
+              <strong>{analysis ? frames.length.toLocaleString('es-ES') : '--'}</strong>
+            </div>
+            <div className="workspace-stat">
+              <span className="workspace-stat__label">En pantalla</span>
+              <strong>{analysis ? currentDetections.length : '--'}</strong>
+            </div>
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-2">
-          <section className="panel-surface self-start rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
-                  Ingesta
-                </p>
-                <h2 className="mt-2 text-xl font-semibold text-white">Analizar Partido</h2>
-              </div>
-              <div className="rounded-full border border-lime-400/25 bg-lime-400/10 px-3 py-1 text-xs font-medium text-lime-200">
-                Entorno local
-              </div>
+        <section className="ingest-panel" aria-label="Iniciar análisis">
+          <div className="ingest-panel__heading">
+            <div>
+              <span className="eyebrow">FUENTE</span>
+              <h2>Nuevo análisis</h2>
             </div>
-
-            <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/10 bg-black/25 p-1" role="group" aria-label="Origen del video">
-              <button type="button" aria-pressed={inputMode === 'url'} onClick={() => setInputMode('url')}
-                className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition ${inputMode === 'url' ? 'bg-lime-300 text-zinc-950' : 'text-white/65 hover:bg-white/5'}`}>
-                <Link2 className="h-4 w-4" /> URL
+            <div className="source-toggle" role="group" aria-label="Origen del video">
+              <button type="button" aria-pressed={inputMode === 'url'} onClick={() => setInputMode('url')}>
+                <Link2 size={16} /> URL
               </button>
-              <button type="button" aria-pressed={inputMode === 'file'} onClick={() => setInputMode('file')}
-                className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition ${inputMode === 'file' ? 'bg-lime-300 text-zinc-950' : 'text-white/65 hover:bg-white/5'}`}>
-                <Upload className="h-4 w-4" /> Archivo
+              <button type="button" aria-pressed={inputMode === 'file'} onClick={() => setInputMode('file')}>
+                <Upload size={16} /> Archivo
               </button>
             </div>
+          </div>
 
-            <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-              {inputMode === 'url' ? (
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-white/78">URL del video</span>
-                  <input
-                    type="url"
-                    required
-                    value={sourceUrl}
-                    onChange={(event) => setSourceUrl(event.target.value)}
-                    placeholder="https://..."
-                    className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-lime-400/60 focus:ring-2 focus:ring-lime-400/20"
-                  />
-                </label>
-              ) : (
-                <div>
-                  <input
-                    ref={fileInputRef}
-                    className="sr-only"
-                    type="file"
-                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.m4v,.mkv"
-                    aria-label="Seleccionar archivo de video"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0]
-                      event.currentTarget.value = ''
-                      if (!file) return
-                      const extension = file.name.split('.').at(-1)?.toLowerCase()
-                      if (!['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm'].includes(extension ?? '')) {
-                        setErrorMessage('Formato no compatible. Selecciona MP4, M4V, MOV, AVI, MKV o WebM.')
-                        return
-                      }
-                      if (file.size > maximumVideoSizeBytes) {
-                        setErrorMessage('El archivo supera el límite de 1 GB.')
-                        return
-                      }
-                      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
-                      const previewUrl = URL.createObjectURL(file)
-                      previewUrlRef.current = previewUrl
-                      setLocalPreviewUrl(previewUrl)
-                      setSelectedVideo(file)
-                      setErrorMessage(null)
-                    }}
-                  />
-                  <button type="button" onClick={() => fileInputRef.current?.click()}
-                    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-black/25 px-4 py-3 text-sm font-medium text-white/80 transition hover:border-lime-300/60 hover:text-lime-200">
-                    <Upload className="h-4 w-4" />
-                    {selectedVideo ? 'Cambiar video' : 'Seleccionar archivo de video'}
-                  </button>
-                  {selectedVideo ? (
-                    <p className="mt-2 break-all text-xs text-white/55">
-                      {selectedVideo.name} · {(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB
-                    </p>
-                  ) : (
-                    <p className="mt-2 text-xs text-white/45">MP4, M4V, MOV, AVI, MKV o WebM · máximo 1 GB</p>
-                  )}
-                </div>
-              )}
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-white/78">Título operativo</span>
+          <form className={`ingest-form ingest-form--${inputMode}`} onSubmit={handleSubmit} noValidate>
+            {inputMode === 'url' ? (
+              <label className="field">
+                <span>URL del video</span>
                 <input
-                  type="text"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Final ATP - Set 1"
-                  className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none transition focus:border-lime-400/60 focus:ring-2 focus:ring-lime-400/20"
+                  type="url"
+                  required
+                  value={sourceUrl}
+                  onChange={(event) => setSourceUrl(event.target.value)}
+                  placeholder="https://..."
                 />
               </label>
-
-              <button
-                type="submit"
-                disabled={isSubmitting || (inputMode === 'url' ? sourceUrl.trim().length === 0 : !selectedVideo)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-lime-300 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:bg-lime-100/50"
-              >
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                    {inputMode === 'file' ? 'Subiendo y analizando...' : 'Analizando...'}
-                  </>
-                ) : (
-                  <>
-                    <Video className="h-4 w-4" />
-                    Analizar Partido
-                  </>
-                )}
-              </button>
-            </form>
-
-            {isSubmitting ? (
-              <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-lime-300/20 bg-lime-300/5 px-4 py-3 text-sm" role="status" aria-live="polite">
-                <span className="text-white/65">Fotogramas procesados</span>
-                <strong className="font-mono text-lime-200">
-                  {processingProgress.processedFrames.toLocaleString('es-ES')}
-                  {processingProgress.totalFrames !== null
-                    ? ` / ${processingProgress.totalFrames.toLocaleString('es-ES')}`
-                    : ''}
-                </strong>
-              </div>
-            ) : null}
-
-            <div className="mt-5 rounded-3xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-white/60">
-              El servicio procesa el video y devuelve detecciones sincronizadas por fotograma.
-            </div>
-
-            {errorMessage ? (
-              <div
-                className="mt-5 flex items-start gap-3 rounded-3xl border border-rose-400/25 bg-rose-500/10 p-4 text-sm text-rose-100"
-                role="alert"
-              >
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-300" />
-                <div>
-                  <p className="font-semibold">No se pudo completar el análisis</p>
-                  <p className="mt-1 text-rose-100/85">{errorMessage}</p>
-                </div>
-              </div>
-            ) : null}
-
-            {analysis ? (
-              <div className="mt-5 rounded-3xl border border-lime-400/20 bg-lime-400/8 p-4 text-sm text-lime-100">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-lime-300" />
-                  <div>
-                    <p className="font-semibold">Procesamiento completado</p>
-                    <p className="mt-1 break-all text-lime-100/80">Match ID: {analysis.matchId}</p>
-                    <p className="mt-1 text-lime-100/75">Estado: {analysis.status}</p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
-          </section>
-
-          <section className="grid min-w-0 content-start gap-6">
-              <section className="panel-surface overflow-hidden rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
-                      Coordenadas métricas
-                    </p>
-                    <h2 className="mt-2 text-xl font-semibold text-white">Posiciones en pista</h2>
-                  </div>
-                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/55">
-                    {currentFrame ? `${formatTime(currentFrame.timestamp_seconds)} · frame ${currentFrame.frame_index}` : 'Sin frame'}
-                  </span>
-                </div>
-
-                <div className="mt-5 aspect-[2.2/1] rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(34,197,94,0.08),rgba(0,0,0,0))] p-3">
-                  {analysis ? (
-                    <CourtVisualization frame={currentFrame} />
-                  ) : (
-                    <div className="court-placeholder flex h-full items-center justify-center rounded-[22px] border border-dashed border-white/10 text-center text-sm text-white/45">
-                      La pista y las detecciones aparecerán al procesar un video.
-                    </div>
-                  )}
-                </div>
-              </section>
-
-            <section className="panel-surface rounded-[28px] border border-white/10 p-5 shadow-xl shadow-black/25 sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/45">
-                    Reproducción sincronizada
-                  </p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">Video del partido</h2>
-                </div>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/55">
-                  {analysis?.title ?? 'Esperando análisis'}
+            ) : (
+              <div className="file-field">
+                <input
+                  ref={fileInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.m4v,.mkv"
+                  aria-label="Seleccionar archivo de video"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    event.currentTarget.value = ''
+                    if (!file) return
+                    const extension = file.name.split('.').at(-1)?.toLowerCase()
+                    if (!['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm'].includes(extension ?? '')) {
+                      setErrorMessage('Formato no compatible. Selecciona MP4, M4V, MOV, AVI, MKV o WebM.')
+                      return
+                    }
+                    if (file.size > maximumVideoSizeBytes) {
+                      setErrorMessage('El archivo supera el límite de 1 GB.')
+                      return
+                    }
+                    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+                    const previewUrl = URL.createObjectURL(file)
+                    previewUrlRef.current = previewUrl
+                    setLocalPreviewUrl(previewUrl)
+                    setSelectedVideo(file)
+                    setErrorMessage(null)
+                  }}
+                />
+                <span className="field-label">Archivo de video</span>
+                <button className="file-picker" type="button" onClick={() => fileInputRef.current?.click()}>
+                  <Upload size={17} />
+                  {selectedVideo ? 'Cambiar archivo' : 'Seleccionar video'}
+                </button>
+                <span className="file-meta">
+                  {selectedVideo
+                    ? `${selectedVideo.name} · ${(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB`
+                    : 'MP4, M4V, MOV, AVI, MKV o WebM · máx. 1 GB'}
                 </span>
               </div>
+            )}
 
-              <div className="mt-5 grid gap-5 xl:grid-cols-[1.45fr_0.55fr]">
-                <VideoPlayer
-                  sourceUrl={analysis?.sourceUrl ?? ''}
-                  onTimeChange={setCurrentTime}
-                  onPlaybackChange={setIsVideoPlaying}
-                />
+            <label className="field field--title">
+              <span>Título</span>
+              <input
+                type="text"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Final ATP · Set 1"
+              />
+            </label>
+
+            <button
+              className="analyze-button"
+              type="submit"
+              disabled={isSubmitting || (inputMode === 'url' ? sourceUrl.trim().length === 0 : !selectedVideo)}
+            >
+              {isSubmitting ? <RefreshCw size={17} className="animate-spin" /> : <Video size={17} />}
+              {isSubmitting ? 'Analizando' : 'Analizar'}
+            </button>
+          </form>
+
+          {isSubmitting ? (
+            <div className="processing-status" role="status" aria-live="polite">
+              <span>Fotogramas procesados</span>
+              <strong>
+                {processingProgress.processedFrames.toLocaleString('es-ES')}
+                {processingProgress.totalFrames !== null
+                  ? ` / ${processingProgress.totalFrames.toLocaleString('es-ES')}`
+                  : ''}
+              </strong>
+            </div>
+          ) : null}
+
+          {errorMessage ? (
+            <div className="notice notice--error" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>No se pudo completar el análisis</strong>
+                <span>{errorMessage}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {analysis ? (
+            <div className="notice notice--success" role="status">
+              <CheckCircle2 size={18} />
+              <strong>Procesamiento completado</strong>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="analysis-grid" aria-label="Revisión del partido">
+          <div className="analysis-primary">
+            <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
+          </div>
+
+          <aside className="analysis-rail">
+            <section className="workspace-panel court-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">COORDENADAS MÉTRICAS</span>
+                  <h2>Mapa de pista</h2>
+                </div>
+                <span className="panel-timestamp">
+                  {currentFrame ? `#${currentFrame.frame_index} · ${formatTime(currentFrame.timestamp_seconds)}` : '--'}
+                </span>
+              </div>
+              <div className="court-map-stage">
+                {analysis ? (
+                  <CourtVisualization frame={currentFrame} />
+                ) : (
+                  <div className="court-map-empty">
+                    <Radar size={22} />
+                    <span>El mapa aparecerá al procesar un partido</span>
+                  </div>
+                )}
+              </div>
+              <div className="map-legend" aria-label="Leyenda del mapa">
+                <span><i className="map-legend__dot map-legend__dot--player" /> Jugadores</span>
+                <span><i className="map-legend__dot map-legend__dot--ball" /> Pelota</span>
+                <span className="map-legend__orientation">Fondo arriba · cámara abajo</span>
               </div>
             </section>
-          </section>
+
+            <section className="workspace-panel source-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">REPRODUCCIÓN</span>
+                  <h2>Video fuente</h2>
+                </div>
+                {analysis?.title ? <span className="source-title">{analysis.title}</span> : null}
+              </div>
+              <VideoPlayer
+                sourceUrl={analysis?.sourceUrl ?? ''}
+                onTimeChange={setCurrentTime}
+                onPlaybackChange={setIsVideoPlaying}
+              />
+            </section>
+          </aside>
         </section>
       </div>
     </main>
