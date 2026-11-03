@@ -89,6 +89,40 @@ test('POST /api/v1/matches/process forwards the video and returns Python telemet
   ]);
 });
 
+test('POST /api/v1/matches/process accepts a client-generated match ID', async () => {
+  const matchId = '123e4567-e89b-42d3-a456-426614174010';
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/matches/process',
+    payload: { sourceUrl: 'https://example.com/match.mp4', matchId },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().matchId, matchId);
+  assert.equal(pythonRequests.at(-1)?.payload.matchId, matchId);
+});
+
+test('GET /api/v1/matches/:matchId/progress proxies frame counts from Python', async () => {
+  const matchId = '123e4567-e89b-42d3-a456-426614174011';
+  const progressApp = await buildApp({
+    fetchImpl: async (input) => {
+      assert.equal(String(input), `http://localhost:8000/matches/${matchId}/progress`);
+      return new Response(JSON.stringify({ processedFrames: 25, totalFrames: 447 }));
+    },
+  });
+
+  try {
+    const response = await progressApp.inject({
+      method: 'GET',
+      url: `/api/v1/matches/${matchId}/progress`,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { processedFrames: 25, totalFrames: 447 });
+  } finally {
+    await progressApp.close();
+  }
+});
+
 test('GET /api/v1/matches/:matchId/telemetry returns the Python telemetry saved for the match', async () => {
   const processResponse = await app.inject({
     method: 'POST',
@@ -206,4 +240,98 @@ test('health and documentation endpoints are available', async () => {
 
   assert.equal(healthResponse.statusCode, 200);
   assert.equal(documentationResponse.statusCode, 200);
+});
+
+test('process and telemetry endpoints preserve frame inspection metadata', async () => {
+  const inspectedTelemetry = [{
+    ...pythonTelemetry[0],
+    image_width: 1280,
+    image_height: 720,
+    court_corners: [[100, 50], [1100, 50], [1200, 650], [50, 650]],
+    detections: [{ ...pythonTelemetry[0].detections[0], carried_forward: true }],
+  }, {
+    ...pythonTelemetry[0],
+    frame_index: 1,
+    image_width: 1280,
+    image_height: 720,
+    court_corners: null,
+  }];
+  const inspectionApp = await buildApp({
+    fetchImpl: async () => new Response(JSON.stringify({ telemetry: inspectedTelemetry })),
+  });
+  try {
+    const response = await inspectionApp.inject({
+      method: 'POST',
+      url: '/api/v1/matches/process',
+      payload: { sourceUrl: 'https://example.com/video.mp4' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().telemetry, inspectedTelemetry);
+    const saved = await inspectionApp.inject({
+      method: 'GET',
+      url: `/api/v1/matches/${response.json().matchId}/telemetry`,
+    });
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(saved.json().telemetry, inspectedTelemetry);
+  } finally {
+    await inspectionApp.close();
+  }
+});
+
+test('POST /api/v1/matches/upload streams an allowed video and stores its telemetry', async () => {
+  const videoBytes = Buffer.from('small video test payload');
+  const forwarded: { url?: string; filename?: string; matchId?: string; bytes: Buffer[] } = { bytes: [] };
+  const uploadApp = await buildApp({
+    fetchImpl: async (input, init) => {
+      forwarded.url = String(input);
+      forwarded.filename = new Headers(init?.headers).get('X-Video-Filename') ?? undefined;
+      forwarded.matchId = new Headers(init?.headers).get('X-Match-Id') ?? undefined;
+      for await (const chunk of init?.body as AsyncIterable<Uint8Array>) {
+        forwarded.bytes.push(Buffer.from(chunk));
+      }
+      return new Response(JSON.stringify({ telemetry: pythonTelemetry }));
+    },
+  });
+
+  try {
+    const response = await uploadApp.inject({
+      method: 'POST',
+      url: '/api/v1/matches/upload',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-video-filename': 'final%20match.mp4',
+        'x-match-id': '123e4567-e89b-42d3-a456-426614174012',
+        'x-title': 'Final%20ATP',
+      },
+      payload: videoBytes,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().matchId, '123e4567-e89b-42d3-a456-426614174012');
+    assert.equal(forwarded.url, 'http://localhost:8000/process-upload');
+    assert.equal(forwarded.filename, 'final%20match.mp4');
+    assert.equal(forwarded.matchId, '123e4567-e89b-42d3-a456-426614174012');
+    assert.deepEqual(Buffer.concat(forwarded.bytes), videoBytes);
+
+    const telemetry = await uploadApp.inject({
+      method: 'GET',
+      url: `/api/v1/matches/${response.json().matchId}/telemetry`,
+    });
+    assert.equal(telemetry.statusCode, 200);
+    assert.deepEqual(telemetry.json().telemetry, pythonTelemetry);
+  } finally {
+    await uploadApp.close();
+  }
+});
+
+test('upload endpoint rejects unsupported file extensions', async () => {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/matches/upload',
+    headers: {
+      'content-type': 'application/octet-stream',
+      'x-video-filename': 'payload.exe',
+    },
+    payload: Buffer.from('not a video'),
+  });
+  assert.equal(response.statusCode, 415);
 });

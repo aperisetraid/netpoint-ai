@@ -1,6 +1,7 @@
 export interface ProcessMatchRequest {
   sourceUrl: string
   title?: string
+  matchId?: string
 }
 
 export interface ProcessMatchResponse {
@@ -15,12 +16,16 @@ export interface DetectionTelemetry {
   bbox: [number, number, number, number]
   x_meters: number | null
   y_meters: number | null
+  carried_forward?: boolean
 }
 
 export interface FrameTelemetry {
   frame_index: number
   timestamp_seconds: number
   detections: DetectionTelemetry[]
+  image_width?: number
+  image_height?: number
+  court_corners?: [number, number][] | null
 }
 
 export interface MatchTelemetryResponse {
@@ -31,6 +36,11 @@ export interface MatchTelemetryResponse {
 const defaultApiBaseUrl = 'http://localhost:3000'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, '')
+const visionBaseUrl = (import.meta.env.VITE_VISION_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
+
+export function getMatchFrameUrl(matchId: string, frameIndex: number): string {
+  return `${visionBaseUrl}/matches/${encodeURIComponent(matchId)}/frames/${frameIndex}`
+}
 
 export class ApiError extends Error {
   readonly status?: number
@@ -91,6 +101,39 @@ export async function processMatch(payload: ProcessMatchRequest): Promise<Proces
 
 export async function getMatchTelemetry(matchId: string): Promise<MatchTelemetryResponse> {
   return requestJson<MatchTelemetryResponse>(`/api/v1/matches/${matchId}/telemetry`, {
+    method: 'GET',
+  })
+}
+
+export async function uploadMatchVideo(
+  file: File,
+  title?: string,
+  matchId?: string,
+): Promise<ProcessMatchResponse> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/octet-stream',
+    'X-Video-Filename': encodeURIComponent(file.name),
+  }
+  if (title) {
+    headers['X-Title'] = encodeURIComponent(title)
+  }
+  if (matchId) {
+    headers['X-Match-Id'] = matchId
+  }
+  return requestJson<ProcessMatchResponse>('/api/v1/matches/upload', {
+    method: 'POST',
+    body: file,
+    headers,
+  })
+}
+
+export interface MatchProgressResponse {
+  processedFrames: number
+  totalFrames: number | null
+}
+
+export async function getMatchProgress(matchId: string): Promise<MatchProgressResponse> {
+  return requestJson<MatchProgressResponse>(`/api/v1/matches/${encodeURIComponent(matchId)}/progress`, {
     method: 'GET',
   })
 }

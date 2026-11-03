@@ -1,4 +1,25 @@
-# React + TypeScript + Vite
+# NetPoint AI Web
+
+## Inspeccion del fotograma
+
+La seccion Fotograma actual, dentro de Ingesta, muestra la imagen del video
+descargado cuando el reproductor esta pausado. Las capas Pista, Jugadores y
+Pelota muestran la calibracion y las detecciones guardadas de ese fotograma;
+no ejecutan una nueva inferencia. Las cajas discontinuas indican posiciones
+de jugadores reutilizadas de fotogramas anteriores.
+
+El navegador consulta las imagenes al servicio de vision en
+`http://localhost:8000`. Para usar otra direccion, configura
+`VITE_VISION_BASE_URL` y reinicia Vite. La API de telemetria sigue usando
+`VITE_API_BASE_URL` (por defecto `http://localhost:3000`).
+
+El servicio de vision ofrece `GET /matches/{matchId}/frames/{frame_index}`
+como imagen JPEG. Los videos se guardan en `temp/matches` del servicio de
+vision; su registro es temporal en memoria. Tras reiniciar el servicio o
+para resultados anteriores sin metadatos de imagen, vuelve a analizar el
+video. Durante la reproduccion no se solicitan imagenes del inspector.
+
+## React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

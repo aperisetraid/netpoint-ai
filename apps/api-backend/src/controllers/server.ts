@@ -48,6 +48,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const getTelemetryUseCase = new GetTelemetryUseCase(matchRegistry);
 
   await app.register(cors, { origin: true });
+  app.addContentTypeParser(
+    'application/octet-stream',
+    (_request, payload, done) => done(null, payload),
+  );
   await registerSwaggerUi(app);
 
   app.get('/health', async () => ({

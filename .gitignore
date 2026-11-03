@@ -14,7 +14,7 @@ build/
 __pycache__/
 *.py[cod]
 *$py.class
-.venv/
+.venv*/
 venv/
 env/
 
@@ -29,3 +29,6 @@ env/
 .vscode/
 .idea/
 .DS_Store
+
+# Archivos temporales
+apps/vision-ai/temp/

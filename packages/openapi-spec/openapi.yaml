@@ -33,6 +33,50 @@ paths:
         '502':
           $ref: '#/components/responses/502BadGateway'
 
+  /matches/upload:
+    post:
+      summary: Subir y procesar un archivo de video
+      description: Acepta videos MP4, M4V, MOV, AVI, MKV o WebM de hasta 1 GB y retransmite el archivo en streaming al servicio de visión.
+      operationId: uploadMatchVideo
+      parameters:
+        - name: X-Video-Filename
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Nombre de archivo codificado con URL encoding.
+        - name: X-Title
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Título del partido codificado con URL encoding.
+        - name: X-Match-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Identificador de partido usado para consultar progreso.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Procesamiento completado y telemetría devuelta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessMatchResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
+
   /matches/{matchId}/status:
     get:
       summary: Consultar estado del procesamiento
@@ -55,6 +99,30 @@ paths:
                 $ref: '#/components/schemas/MatchStatusResponse'
         '404':
           $ref: '#/components/responses/404NotFound'
+
+  /matches/{matchId}/progress:
+    get:
+      summary: Consultar fotogramas procesados
+      description: Devuelve el avance actual del procesamiento del video.
+      operationId: getMatchProgress
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Progreso actual.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchProgressResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
 
   /matches/{matchId}/telemetry:
     get:
@@ -127,6 +195,9 @@ components:
         title:
           type: string
           example: "Final Alcaraz vs Sinner - Set 1"
+        matchId:
+          type: string
+          format: uuid
 
     ProcessMatchResponse:
       type: object
@@ -169,6 +240,21 @@ components:
           maximum: 100
           example: 100
 
+    MatchProgressResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - processedFrames
+        - totalFrames
+      properties:
+        processedFrames:
+          type: integer
+          minimum: 0
+        totalFrames:
+          type: integer
+          minimum: 0
+          nullable: true
+
     MatchTelemetryResponse:
       type: object
       additionalProperties: false
@@ -198,6 +284,24 @@ components:
         timestamp_seconds:
           type: number
           example: 0.04
+        image_width:
+          type: integer
+          minimum: 1
+        image_height:
+          type: integer
+          minimum: 1
+        court_corners:
+          type: array
+          nullable: true
+          minItems: 4
+          maxItems: 4
+          description: Vértices en píxeles usados para la calibración, en orden alrededor de la pista; null si no se ha calibrado.
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
         detections:
           type: array
           items:
@@ -219,6 +323,9 @@ components:
         confidence:
           type: number
           example: 0.97
+        carried_forward:
+          type: boolean
+          description: Indica una posición de jugador reutilizada de un fotograma anterior, no una detección nueva.
         bbox:
           type: array
           minItems: 4

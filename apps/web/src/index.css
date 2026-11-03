@@ -2,11 +2,11 @@
 
 :root {
   color-scheme: dark;
-  --color-bg: #0a0a0a;
-  --color-foreground: #eef2e6;
-  --color-panel: #151515;
-  --color-border: rgba(255, 255, 255, 0.08);
-  font-family: 'Segoe UI', 'Inter', sans-serif;
+  --color-bg: #0c1110;
+  --color-foreground: #edf2e8;
+  --color-panel: #1b2620;
+  --color-border: rgba(225, 239, 223, 0.11);
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
