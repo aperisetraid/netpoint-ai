@@ -20,7 +20,6 @@ const maxBallImageSpeedPerSecond = 1.5
 export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
   const bounces: Bounce[] = []
   let samples: BallSample[] = []
-  let samplesStartedAfterGap = false
 
   function addBounce(candidate: BallSample) {
     if (bounces.length && candidate.frame.timestamp_seconds - bounces[bounces.length - 1].timestamp < 0.3) return
@@ -40,22 +39,7 @@ export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
       && centerY >= detection.bbox[1] && centerY <= detection.bbox[3])
   }
 
-  function processSamples(inferBounceAtStart: boolean) {
-    if (inferBounceAtStart && samples.length >= 3) {
-      const candidate = samples[0]
-      const nextSamples = samples.slice(1).filter((sample) =>
-        sample.frame.timestamp_seconds - candidate.frame.timestamp_seconds <= 0.2)
-      const next = nextSamples.slice(0, 2)
-      const threshold = Math.max(2, (candidate.frame.image_height ?? 720) * 0.003)
-      if (next.length === 2
-        && candidate.imageY > next[0].imageY
-        && next[0].imageY > next[1].imageY
-        && candidate.imageY - next[1].imageY >= threshold
-        && !overlapsPlayer(candidate)) {
-        addBounce(candidate)
-      }
-    }
-
+  function processSamples() {
     for (let index = 2; index < samples.length - 2; index++) {
       const candidate = samples[index]
       if (candidate.imageY <= samples[index - 1].imageY || candidate.imageY < samples[index + 1].imageY) continue
@@ -85,6 +69,12 @@ export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
       const next = samples[index + 1]
       const previousX = (previous.ball.bbox[0] + previous.ball.bbox[2]) / 2
       const nextX = (next.ball.bbox[0] + next.ball.bbox[2]) / 2
+      const beforeX = (samples[index - 2].ball.bbox[0] + samples[index - 2].ball.bbox[2]) / 2
+      const afterX = (samples[index + 2].ball.bbox[0] + samples[index + 2].ball.bbox[2]) / 2
+      const incomingHorizontalMotion = centerX - beforeX
+      const outgoingHorizontalMotion = afterX - centerX
+      if (incomingHorizontalMotion * outgoingHorizontalMotion < 0) continue
+
       const fraction = (candidate.frame.timestamp_seconds - previous.frame.timestamp_seconds)
         / (next.frame.timestamp_seconds - previous.frame.timestamp_seconds)
       const expectedX = previousX + (nextX - previousX) * fraction
@@ -115,11 +105,9 @@ export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
       const verticalDistance = sample.imageY - previous.imageY
       const maxDistance = Math.max(12, (frame.image_width ?? 1920) * maxBallImageSpeedPerSecond * elapsed)
       if (elapsed > maxTrajectoryGapSeconds || elapsed <= 0 || Math.hypot(horizontalDistance, verticalDistance) > maxDistance) {
-        const hasLongObservationGap = elapsed > maxTrajectoryGapSeconds
-        processSamples(samplesStartedAfterGap)
+        processSamples()
         samples = []
-        samplesStartedAfterGap = elapsed > 0.08
-        if (hasLongObservationGap) {
+        if (elapsed > maxTrajectoryGapSeconds) {
           samples.push(sample)
           continue
         }
@@ -127,6 +115,10 @@ export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
     }
     samples.push(sample)
   }
-  processSamples(samplesStartedAfterGap)
+  processSamples()
   return bounces
+}
+
+export function getVisibleBounces(bounces: Bounce[], currentTime: number): Bounce[] {
+  return bounces.filter((bounce) => bounce.timestamp <= currentTime)
 }

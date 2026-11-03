@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -7,6 +8,60 @@ from court_detector import CourtDetector
 
 
 class CourtDetectorTests(unittest.TestCase):
+    def test_selects_court_baseline_over_contaminated_hough_cluster(self):
+        video_path = Path(__file__).resolve().parents[2] / "assets" / "Test - Trim.mp4"
+        capture = cv2.VideoCapture(str(video_path))
+        self.addCleanup(capture.release)
+        self.assertTrue(capture.isOpened())
+        capture.set(cv2.CAP_PROP_POS_FRAMES, 14)
+        success, frame = capture.read()
+        self.assertTrue(success)
+
+        corners = CourtDetector().detect_corners(frame)
+
+        self.assertIsNotNone(corners)
+        expected = np.asarray(
+            [[643, 270], [1273, 270], [1558, 847], [342, 851]],
+            dtype=np.int32,
+        )
+        np.testing.assert_allclose(corners, expected, atol=25)
+
+    def test_selects_outer_doubles_sideline_over_inner_singles_line(self):
+        video_path = Path(__file__).resolve().parents[2] / "assets" / "Test - Trim.mp4"
+        capture = cv2.VideoCapture(str(video_path))
+        self.addCleanup(capture.release)
+        self.assertTrue(capture.isOpened())
+        capture.set(cv2.CAP_PROP_POS_FRAMES, 375)
+        success, frame = capture.read()
+        self.assertTrue(success)
+
+        corners = CourtDetector().detect_corners(frame)
+
+        self.assertIsNotNone(corners)
+        expected = np.asarray(
+            [[643, 270], [1273, 270], [1558, 847], [342, 851]],
+            dtype=np.int32,
+        )
+        np.testing.assert_allclose(corners, expected, atol=25)
+
+    def test_selects_far_baseline_from_sequentially_decoded_video_frame(self):
+        video_path = Path(__file__).resolve().parents[2] / "assets" / "Test - Trim.mp4"
+        capture = cv2.VideoCapture(str(video_path))
+        self.addCleanup(capture.release)
+        self.assertTrue(capture.isOpened())
+        for _ in range(201):
+            success, frame = capture.read()
+            self.assertTrue(success)
+
+        corners = CourtDetector().detect_corners(frame)
+
+        self.assertIsNotNone(corners)
+        expected = np.asarray(
+            [[644, 270], [1272, 271], [1558, 847], [350, 845]],
+            dtype=np.int32,
+        )
+        np.testing.assert_allclose(corners, expected, atol=25)
+
     def test_selects_court_over_advertising_net_and_center_lines(self):
         frame = np.full((720, 962, 3), (30, 30, 180), dtype=np.uint8)
         expected = np.asarray(

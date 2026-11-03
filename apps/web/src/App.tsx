@@ -22,7 +22,8 @@ import {
   processMatch,
   uploadMatchVideo,
 } from './services/api'
-import { detectBounces, type Bounce } from './bounceDetection'
+import { detectBounces, getVisibleBounces, type Bounce } from './bounceDetection'
+import { calculateMatchStatistics, type MatchStatistics } from './matchStatistics'
 import './App.css'
 
 interface YouTubePlayer {
@@ -240,30 +241,6 @@ function VideoPlayer({ sourceUrl, onTimeChange, onPlaybackChange }: VideoPlayerP
         )}
         {playerError ? <p className="video-player__error">{playerError}</p> : null}
       </div>
-      {/* <div className="video-player__controls">
-        <button
-          className="icon-button"
-          type="button"
-          title={isPlaying ? 'Pausar video' : 'Reproducir video'}
-          aria-label={isPlaying ? 'Pausar video' : 'Reproducir video'}
-          disabled={!sourceUrl || (youTubeVideoId !== null && !youTubeReady)}
-          onClick={togglePlayback}
-        >
-          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-        </button>
-        <span className="video-player__time">{formatTime(currentTime)}</span>
-        <input
-          aria-label="Posición del video"
-          type="range"
-          min={0}
-          max={maxTime || 0.04}
-          step={0.04}
-          value={Math.min(currentTime, maxTime || 0)}
-          disabled={!sourceUrl || maxTime === 0}
-          onChange={(event) => seekTo(Number(event.target.value))}
-        />
-        <span className="video-player__time">{formatTime(maxTime)}</span>
-      </div> */}
     </div>
   )
 }
@@ -437,6 +414,35 @@ function CourtVisualization({ frame, bounces, playerNames }: CourtVisualizationP
   )
 }
 
+function DetectionCoverageRow({ label, detectedFrames, totalFrames, kind }: {
+  label: string
+  detectedFrames: number
+  totalFrames: number
+  kind: 'player' | 'ball'
+}) {
+  const percentage = totalFrames ? Math.round((detectedFrames / totalFrames) * 100) : 0
+
+  return (
+    <div className="match-stats__coverage-row">
+      <span className="match-stats__coverage-label" title={label}>{label}</span>
+      <div
+        className={`match-stats__bar match-stats__bar--${kind}`}
+        role="progressbar"
+        aria-label={`Cobertura de ${label}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percentage}
+      >
+        <span style={{ width: `${percentage}%` }} />
+      </div>
+      <strong>{percentage}%</strong>
+      <span className="match-stats__coverage-count">
+        {detectedFrames.toLocaleString('es-ES')}/{totalFrames.toLocaleString('es-ES')}
+      </span>
+    </div>
+  )
+}
+
 function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     window.localStorage.getItem('netpoint-theme') === 'light' ? 'light' : 'dark',
@@ -480,14 +486,20 @@ function App() {
     if (!isPlayerDialogOpen && dialog.open) dialog.close()
   }, [isPlayerDialogOpen])
 
-  const frames = analysis?.telemetry ?? []
+  const frames = useMemo(() => analysis?.telemetry ?? [], [analysis])
   const bounces = useMemo(() => detectBounces(analysis?.telemetry ?? []), [analysis])
+  const statistics: MatchStatistics = useMemo(
+    () => calculateMatchStatistics(frames, bounces.length),
+    [frames, bounces.length],
+  )
   const currentFrame = frames.reduce<FrameTelemetry | undefined>(
     (selectedFrame, frame) =>
       frame.timestamp_seconds <= currentTime ? frame : selectedFrame,
     undefined,
   )
-  const currentDetections = currentFrame?.detections ?? []
+  const visibleBounces = currentFrame
+    ? getVisibleBounces(bounces, currentFrame.timestamp_seconds)
+    : []
 
   async function startAnalysis() {
     if (isSubmitting) {
@@ -656,6 +668,19 @@ function App() {
             <span className="eyebrow">ANÁLISIS DE PARTIDO</span>
             <h1>{analysis?.title ?? 'Centro de análisis'}</h1>
           </div>
+
+          <div className="workspace-stats">
+            <div className="workspace-stat">
+              <span className="workspace-stat__label">Estado</span>
+              <strong className={isSubmitting ? 'is-live' : ''}>
+                {analysis ? 'Procesado' : isSubmitting ? 'En curso' : 'En espera'}
+              </strong>
+            </div>
+            <div className="workspace-stat">
+              <span className="workspace-stat__label">Frames</span>
+              <strong>{analysis ? frames.length.toLocaleString('es-ES') : '--'}</strong>
+            </div>
+          </div>
           <div className="theme-toggle" role="group" aria-label="Tema de la interfaz">
             <button
               type="button"
@@ -675,22 +700,6 @@ function App() {
             >
               <Moon size={17} />
             </button>
-          </div>
-          <div className="workspace-stats">
-            <div className="workspace-stat">
-              <span className="workspace-stat__label">Estado</span>
-              <strong className={isSubmitting ? 'is-live' : ''}>
-                {analysis ? 'Procesado' : isSubmitting ? 'En curso' : 'En espera'}
-              </strong>
-            </div>
-            <div className="workspace-stat">
-              <span className="workspace-stat__label">Frames</span>
-              <strong>{analysis ? frames.length.toLocaleString('es-ES') : '--'}</strong>
-            </div>
-            <div className="workspace-stat">
-              <span className="workspace-stat__label">En pantalla</span>
-              <strong>{analysis ? currentDetections.length : '--'}</strong>
-            </div>
           </div>
         </header>
 
@@ -827,7 +836,7 @@ function App() {
             </div>
             <div className="court-map-stage">
               {analysis ? (
-                <CourtVisualization frame={currentFrame} bounces={bounces} playerNames={playerNames} />
+                <CourtVisualization frame={currentFrame} bounces={visibleBounces} playerNames={playerNames} />
               ) : (
                 <div className="court-map-empty">
                   <Radar size={22} />
@@ -863,11 +872,53 @@ function App() {
                 <h2>Estadísticas</h2>
               </div>
             </div>
-            <div className="stats-coming-soon">
-              <ChartNoAxesCombined size={28} strokeWidth={1.5} />
-              <strong>COMING SOON</strong>
-              <span>Resumen y métricas del partido</span>
-            </div>
+            {analysis ? (
+              <div className="match-stats">
+                <div className="match-stats__summary">
+                  <div className="match-stats__metric">
+                    <span className="match-stats__metric-label">Duración</span>
+                    <strong className="match-stats__metric-value">{formatTime(statistics.durationSeconds)}</strong>
+                  </div>
+                  <div className="match-stats__metric">
+                    <span className="match-stats__metric-label">Fotogramas</span>
+                    <strong className="match-stats__metric-value">{statistics.frameCount.toLocaleString('es-ES')}</strong>
+                  </div>
+                  <div className="match-stats__metric">
+                    <span className="match-stats__metric-label">Botes</span>
+                    <strong className="match-stats__metric-value">{statistics.bounceCount.toLocaleString('es-ES')}</strong>
+                  </div>
+                </div>
+                <div className="match-stats__coverage">
+                  <div className="match-stats__coverage-heading">
+                    <h3><ChartNoAxesCombined size={16} /> Cobertura</h3>
+                    <span>frames detectados</span>
+                  </div>
+                  <DetectionCoverageRow
+                    label={playerNames.far || 'Fondo'}
+                    detectedFrames={statistics.farPlayerFrames}
+                    totalFrames={statistics.frameCount}
+                    kind="player"
+                  />
+                  <DetectionCoverageRow
+                    label={playerNames.near || 'Cámara'}
+                    detectedFrames={statistics.nearPlayerFrames}
+                    totalFrames={statistics.frameCount}
+                    kind="player"
+                  />
+                  <DetectionCoverageRow
+                    label="Pelota"
+                    detectedFrames={statistics.ballFrames}
+                    totalFrames={statistics.frameCount}
+                    kind="ball"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="match-stats__empty">
+                <ChartNoAxesCombined size={24} strokeWidth={1.5} />
+                <span>Analiza un partido para ver sus estadísticas</span>
+              </div>
+            )}
           </section>
         </section>
       </div>

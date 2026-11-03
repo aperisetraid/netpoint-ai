@@ -10,6 +10,7 @@ import numpy as np
 
 import server
 from tracker import (
+    PLAYER_BASELINE_MARGIN_METERS,
     TennisTracker,
     ball_candidate_near_player,
     detect_tennis_ball_color,
@@ -94,6 +95,31 @@ class FrameInspectionTests(unittest.TestCase):
         self.assertEqual(len(detected_frames), 3)
         self.assertEqual(progress_updates, [(0, 12), (5, 12), (10, 12), (12, 12)])
 
+    def test_tracker_ignores_isolated_court_calibration_outlier(self):
+        video_path = Path(self.directory.name) / "outlier-video.mp4"
+        writer = cv2.VideoWriter(
+            str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 25, (64, 48)
+        )
+        for _ in range(22):
+            writer.write(np.zeros((48, 64, 3), dtype=np.uint8))
+        writer.release()
+
+        tracker = TennisTracker.__new__(TennisTracker)
+        tracker.target_classes = [0, 32]
+        tracker.model = lambda *args, **kwargs: [SimpleNamespace(boxes=[])]
+        corners = [(0, 0), (63, 0), (63, 47), (0, 47)]
+        outlier = [(12, 0), (63, 0), (63, 47), (12, 47)]
+        detections = iter((corners, outlier, corners, outlier, outlier))
+        tracker.court_detector = SimpleNamespace(
+            detect_corners=lambda frame: next(detections)
+        )
+
+        telemetry = tracker.process_video(str(video_path))
+
+        self.assertEqual(len(telemetry), 22)
+        self.assertTrue(all(frame["court_corners"] == corners for frame in telemetry[:20]))
+        self.assertTrue(all(frame["court_corners"] == outlier for frame in telemetry[20:]))
+
     def test_video_progress_endpoint_returns_current_frame_count(self):
         server.progress_by_match["progress-test"] = {
             "processedFrames": 25,
@@ -136,7 +162,7 @@ class FrameInspectionTests(unittest.TestCase):
         box = SimpleNamespace(
             cls=np.asarray([0]),
             conf=np.asarray([0.9]),
-            xyxy=np.asarray([[20, 6, 40, 16]], dtype=np.float32),
+            xyxy=np.asarray([[20, 6, 40, 15]], dtype=np.float32),
         )
         tracker.model = lambda *args, **kwargs: [SimpleNamespace(boxes=[box])]
         corners = [(0, 20), (63, 20), (63, 40), (0, 40)]
@@ -149,8 +175,13 @@ class FrameInspectionTests(unittest.TestCase):
             for detection in telemetry[0]["detections"]
             if detection["class"] == "player"
         )
-        self.assertGreaterEqual(player["x_meters"], -5.0)
+        self.assertGreaterEqual(player["x_meters"], -PLAYER_BASELINE_MARGIN_METERS)
         self.assertLess(player["x_meters"], 0)
+
+    def test_player_deep_behind_baseline_requires_confidence_and_stays_bounded(self):
+        self.assertTrue(player_within_tracking_region(-5.43, 3.62, 0.565))
+        self.assertFalse(player_within_tracking_region(-5.43, 3.62, 0.3))
+        self.assertFalse(player_within_tracking_region(-6.6, 3.62, 0.9))
 
     def test_tracker_rejects_low_confidence_person_at_sideline_post(self):
         tracker = TennisTracker.__new__(TennisTracker)

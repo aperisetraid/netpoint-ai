@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { detectBounces } from '../src/bounceDetection.ts'
+import { detectBounces, getVisibleBounces } from '../src/bounceDetection.ts'
 
 function makeFrames(positions) {
   return positions.map((position, index) => ({
@@ -23,6 +23,17 @@ const positions = (values) => values.map((y) => y === null ? null : { x: 100, y 
 test('detects a vertical reversal and records its position and time', () => {
   const bounces = detectBounces(makeFrames(positions([90, 94, 100, 97, 94])))
   assert.deepEqual(bounces, [{ timestamp: 2 / 30, x: 10, y: 4 }])
+})
+
+test('only shows bounces reached by the current playback frame', () => {
+  const bounces = [
+    { timestamp: 0.2, x: 4, y: 3 },
+    { timestamp: 0.5, x: 8, y: 6 },
+    { timestamp: 1.2, x: 12, y: 5 },
+  ]
+
+  assert.deepEqual(getVisibleBounces(bounces, 0), [])
+  assert.deepEqual(getVisibleBounces(bounces, 0.5), bounces.slice(0, 2))
 })
 
 test('does not count uninterrupted motion or stationary noise', () => {
@@ -57,6 +68,17 @@ test('does not count a reversal at a player as a bounce', () => {
   assert.deepEqual(detectBounces(frames), [])
 })
 
+test('does not count a vertical peak when horizontal motion reverses too', () => {
+  const frames = makeFrames(positions([90, 94, 100, 97, 94]))
+  const horizontalPositions = [100, 120, 140, 120, 100]
+  for (const [index, frame] of frames.entries()) {
+    const ball = frame.detections[0]
+    ball.bbox = [horizontalPositions[index], ball.bbox[1], horizontalPositions[index] + 5, ball.bbox[3]]
+  }
+
+  assert.deepEqual(detectBounces(frames), [])
+})
+
 test('rejects a trajectory spike observed in the test video', () => {
   const frames = makeFrames([
     { x: 1373, y: 828 }, { x: 1388, y: 831 }, { x: 1316, y: 942 },
@@ -86,7 +108,7 @@ test('preserves a bounce when the ball is briefly missing after contact', () => 
   assert.equal(detectBounces(frames)[0]?.timestamp, 2 / 30)
 })
 
-test('detects a bounce at the start of a trajectory after a long observation gap', () => {
+test('does not infer a bounce when a trajectory resumes without observing descent', () => {
   const frames = makeFrames(positions([90, ...Array(11).fill(null), 100, 94, 88]))
   for (const frame of frames.slice(12)) {
     const ball = frame.detections[0]
@@ -94,10 +116,22 @@ test('detects a bounce at the start of a trajectory after a long observation gap
     ball.y_meters = 4.34
   }
 
-  assert.deepEqual(detectBounces(frames), [{ timestamp: 12 / 30, x: 22.9, y: 4.34 }])
+  assert.deepEqual(detectBounces(frames), [])
 })
 
-test('detects a bounce after missed frames and a spatially separated false detection', () => {
+test('detects a bounce with observed descent and ascent after a long gap', () => {
+  const frames = makeFrames(positions([
+    90, ...Array(12).fill(null), 90, 94, 100, 97, 94,
+  ]))
+  for (const frame of frames.slice(13)) {
+    frame.detections[0].x_meters = 22.9
+    frame.detections[0].y_meters = 4.34
+  }
+
+  assert.deepEqual(detectBounces(frames), [{ timestamp: 15 / 30, x: 22.9, y: 4.34 }])
+})
+
+test('does not infer a bounce after missed frames without observed descent', () => {
   const frames = makeFrames([
     { x: 900, y: 330 }, null, null,
     { x: 512, y: 522 }, { x: 513, y: 515 }, { x: 514, y: 505 },
@@ -107,7 +141,7 @@ test('detects a bounce after missed frames and a spatially separated false detec
     frame.detections[0].y_meters = 4.34
   }
 
-  assert.deepEqual(detectBounces(frames), [{ timestamp: 3 / 30, x: 22.9, y: 4.34 }])
+  assert.deepEqual(detectBounces(frames), [])
 })
 
 test('does not infer a bounce after an abrupt spatial tracking switch', () => {

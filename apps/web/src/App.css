@@ -658,10 +658,26 @@
 .analysis-panel--frames .frame-inspector { height: 100%; }
 
 .stats-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
-.stats-coming-soon { display: grid; align-content: center; justify-items: center; gap: 12px; min-height: 0; color: #819087; text-align: center; }
-.stats-coming-soon svg { color: #85b86a; }
-.stats-coming-soon strong { color: #d3e2cf; font-size: 13px; font-weight: 700; }
-.stats-coming-soon span { color: #89968c; font-size: 12px; }
+.match-stats { display: grid; align-content: start; gap: 18px; min-height: 0; padding-top: 12px; }
+.match-stats__summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--color-border); }
+.match-stats__metric { display: grid; align-content: center; gap: 7px; min-width: 0; padding: 12px; }
+.match-stats__metric + .match-stats__metric { border-left: 1px solid var(--color-border); }
+.match-stats__metric-label { overflow: hidden; color: #89968c; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.match-stats__metric-value { color: #e5eee1; font-size: 21px; font-variant-numeric: tabular-nums; font-weight: 650; }
+.match-stats__coverage { display: grid; gap: 13px; }
+.match-stats__coverage-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.match-stats__coverage-heading h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: #d4dfd1; font-size: 12px; font-weight: 650; }
+.match-stats__coverage-heading svg { color: #b7dc72; }
+.match-stats__coverage-heading > span { color: #89968c; font-size: 10px; }
+.match-stats__coverage-row { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(60px, 1.7fr) 38px 64px; align-items: center; gap: 10px; min-width: 0; }
+.match-stats__coverage-label { overflow: hidden; color: #c8d2c7; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.match-stats__bar { height: 7px; overflow: hidden; border-radius: 999px; background: rgba(220, 232, 214, 0.1); }
+.match-stats__bar > span { display: block; height: 100%; border-radius: inherit; background: #b7dc72; }
+.match-stats__bar--ball > span { background: #55c5df; }
+.match-stats__coverage-row > strong { color: #dce8d6; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.match-stats__coverage-count { color: #89968c; font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.match-stats__empty { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 0; color: #89968c; font-size: 12px; text-align: center; }
+.match-stats__empty svg { flex: 0 0 auto; color: #85b86a; }
 
 .panel-timestamp,
 .source-title {
@@ -810,6 +826,9 @@
   .analysis-panel--video .video-player__screen { height: auto; aspect-ratio: 16 / 9; }
   .analysis-panel--frames .frame-inspector { height: auto; }
   .stats-panel { min-height: 280px; }
+  .match-stats__metric { padding: 10px 8px; }
+  .match-stats__metric-value { font-size: 18px; }
+  .match-stats__coverage-row { grid-template-columns: minmax(52px, 1fr) minmax(48px, 1.5fr) 34px 54px; gap: 7px; }
   .court-map-stage { min-height: 380px; height: min(68vh, 560px); }
   .map-legend__orientation { margin-left: 0; }
 }
@@ -910,8 +929,14 @@
     box-shadow: 0 12px 30px rgba(37, 58, 42, 0.07);
   }
 
-  .app-shell[data-theme='light'] .stats-coming-soon strong { color: #334536; }
-  .app-shell[data-theme='light'] .stats-coming-soon span { color: #718074; }
+  .app-shell[data-theme='light'] .match-stats__metric-value,
+  .app-shell[data-theme='light'] .match-stats__coverage-heading h3,
+  .app-shell[data-theme='light'] .match-stats__coverage-row > strong { color: #334536; }
+  .app-shell[data-theme='light'] .match-stats__metric-label,
+  .app-shell[data-theme='light'] .match-stats__coverage-heading > span,
+  .app-shell[data-theme='light'] .match-stats__coverage-label,
+  .app-shell[data-theme='light'] .match-stats__coverage-count,
+  .app-shell[data-theme='light'] .match-stats__empty { color: #718074; }
 
   .app-shell[data-theme='light'] .theme-toggle button { color: #627064; }
   .app-shell[data-theme='light'] .theme-toggle button[aria-pressed='true'] { background: #e8f0df; color: #446738; }

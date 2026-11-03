@@ -9,6 +9,7 @@ Point = Tuple[int, int]
 Segment = Tuple[int, int, int, int, float]
 Line = Tuple[float, float, float]
 LineCandidate = Tuple[Line, float, float, float, float]
+BASELINE_FIT_TOLERANCE_RATIO = 0.015
 
 
 class CourtDetector:
@@ -140,8 +141,8 @@ class CourtDetector:
                             side_support = (first_side[1] + second_side[1]) / 2
                             score = (
                                 area * 2
-                                + (far_support + near_support) / (2 * width) * 0.3
-                                + side_support / height * 0.3
+                                + (far_support + near_support) / (2 * width) * 0.1
+                                + side_support / height * 0.2
                                 + (near_y - far_y) / height * 0.3
                             )
                             if score > best_score:
@@ -221,6 +222,12 @@ class CourtDetector:
                 for value in cv2.fitLine(points, cv2.DIST_WELSCH, 0, 0.01, 0.01).flatten()
             )
             line = (-vy, vx, -vy * x + vx * y)
+            if is_baseline:
+                fitted_position = (
+                    line[2] - line[0] * (width / 2)
+                ) / line[1]
+                if abs(fitted_position - position) > height * BASELINE_FIT_TOLERANCE_RATIO:
+                    continue
             projections = points[:, 0] * vx + points[:, 1] * vy
             candidates.append((line, support, position, float(projections.min()), float(projections.max())))
         return candidates

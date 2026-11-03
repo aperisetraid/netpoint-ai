@@ -16,7 +16,9 @@ from homography import (
 
 CALIBRATION_WINDOW_FRAMES = 30
 CALIBRATION_RETRY_INTERVAL = 5
-PLAYER_BASELINE_MARGIN_METERS = 5.0
+COURT_MAX_CORNER_DISPLACEMENT_RATIO = 0.05
+COURT_RECALIBRATION_CONFIRMATIONS = 2
+PLAYER_BASELINE_MARGIN_METERS = 6.5
 PLAYER_SIDELINE_MARGIN_METERS = 3.0
 PLAYER_OFF_COURT_MIN_CONFIDENCE = 0.4
 PLAYER_SIDELINE_BASELINE_ZONE_METERS = 2.0
@@ -118,6 +120,15 @@ def point_outside_court_near_baseline(
     )
 
 
+def mean_corner_displacement(
+    first: list[tuple[int, int]],
+    second: list[tuple[int, int]],
+) -> float:
+    first_points = np.asarray(first, dtype=np.float32)
+    second_points = np.asarray(second, dtype=np.float32)
+    return float(np.linalg.norm(first_points - second_points, axis=1).mean())
+
+
 def player_within_tracking_region(
     x_meters: float,
     y_meters: float,
@@ -126,6 +137,8 @@ def player_within_tracking_region(
     if not -PLAYER_BASELINE_MARGIN_METERS <= x_meters <= COURT_LENGTH_METERS + PLAYER_BASELINE_MARGIN_METERS:
         return False
     if not -PLAYER_SIDELINE_MARGIN_METERS <= y_meters <= COURT_WIDTH_METERS + PLAYER_SIDELINE_MARGIN_METERS:
+        return False
+    if not 0 <= x_meters <= COURT_LENGTH_METERS and confidence < PLAYER_OFF_COURT_MIN_CONFIDENCE:
         return False
     if 0 <= y_meters <= COURT_WIDTH_METERS:
         return True
@@ -244,6 +257,8 @@ class TennisTracker:
         telemetry = []
         homography_matrix = None
         calibrated_corners = None
+        pending_court_corners = None
+        pending_court_corner_count = 0
         last_player_by_side = {}
         last_player_frame_by_side = {}
         previous_video_frame = None
@@ -272,7 +287,40 @@ class TennisTracker:
                         f"{CALIBRATION_WINDOW_FRAMES} frames; se reintentará "
                         f"cada {CALIBRATION_RETRY_INTERVAL} frames."
                     )
-                court_corners = self.court_detector.detect_corners(frame)
+                detected_corners = self.court_detector.detect_corners(frame)
+                court_corners = detected_corners
+                if detected_corners is None or len(detected_corners) != 4:
+                    pending_court_corners = None
+                    pending_court_corner_count = 0
+                else:
+                    if calibrated_corners is not None:
+                        max_displacement = max(frame.shape[:2]) * COURT_MAX_CORNER_DISPLACEMENT_RATIO
+                        displacement = mean_corner_displacement(
+                            detected_corners,
+                            calibrated_corners,
+                        )
+                        if displacement > max_displacement:
+                            if (
+                                pending_court_corners is not None
+                                and mean_corner_displacement(
+                                    detected_corners,
+                                    pending_court_corners,
+                                ) <= max_displacement
+                            ):
+                                pending_court_corner_count += 1
+                            else:
+                                pending_court_corners = detected_corners
+                                pending_court_corner_count = 1
+
+                            if pending_court_corner_count < COURT_RECALIBRATION_CONFIRMATIONS:
+                                court_corners = None
+                            else:
+                                pending_court_corners = None
+                                pending_court_corner_count = 0
+                        else:
+                            pending_court_corners = None
+                            pending_court_corner_count = 0
+
                 if court_corners is not None and len(court_corners) == 4:
                     try:
                         homography_matrix = get_homography_matrix(court_corners)
