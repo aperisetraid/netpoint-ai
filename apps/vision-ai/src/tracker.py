@@ -26,6 +26,10 @@ PLAYER_MIN_CONFIDENCE = 0.2
 PLAYER_SIDELINE_EDGE_MARGIN_METERS = 0.5
 PLAYER_SIDELINE_EDGE_MIN_CONFIDENCE = 0.3
 MAX_PLAYER_CARRY_FORWARD_FRAMES = 3
+# A ball over a blue court often renders as a pale, desaturated blob rather than yellow-green.
+PALE_BALL_HSV_LOWER = (92, 45, 205)
+PALE_BALL_HSV_UPPER = (125, 120, 255)
+PALE_BALL_SCORE_PENALTY = 0.2
 
 
 def ball_candidate_near_player(
@@ -77,17 +81,14 @@ def point_near_court_baseline(
     court_corners: list[tuple[int, int]],
 ) -> bool:
     corners = np.asarray(court_corners, dtype=np.float32)
-    edges = [
-        (float(np.linalg.norm(end - start)), start, end)
-        for start, end in zip(corners, np.roll(corners, -1, axis=0))
-    ]
-    baselines = sorted(edges, key=lambda edge: edge[0], reverse=True)[:2]
-    baseline_midpoints = [(start + end) / 2 for _, start, end in baselines]
+    # Corners are TL, TR, BR, BL; under perspective the far baseline can be shorter than a sideline.
+    baselines = ((corners[0], corners[1]), (corners[3], corners[2]))
+    baseline_midpoints = [(start + end) / 2 for start, end in baselines]
     court_depth = float(np.linalg.norm(baseline_midpoints[0] - baseline_midpoints[1]))
     max_extension = max(12.0, court_depth * 0.35)
     point_array = np.asarray(point, dtype=np.float32)
 
-    for _, start, end in baselines:
+    for start, end in baselines:
         edge = end - start
         projection = float(np.dot(point_array - start, edge) / np.dot(edge, edge))
         if not 0 <= projection <= 1:
@@ -176,10 +177,32 @@ def detect_tennis_ball_color(
         difference = cv2.absdiff(frame, previous_frame)
         difference = cv2.cvtColor(difference, cv2.COLOR_BGR2GRAY)
         motion_mask = cv2.threshold(difference, 15, 255, cv2.THRESH_BINARY)[1]
+    contour_sources = [(contour, False) for contour in contours]
+    if motion_mask is not None:
+        court_fill = np.zeros(mask.shape, dtype=np.uint8)
+        cv2.fillConvexPoly(court_fill, court_polygon.astype(np.int32), 255)
+        pale_mask = cv2.bitwise_and(
+            cv2.inRange(
+                hsv,
+                np.asarray(PALE_BALL_HSV_LOWER, dtype=np.uint8),
+                np.asarray(PALE_BALL_HSV_UPPER, dtype=np.uint8),
+            ),
+            court_fill,
+        )
+        pale_contours, _ = cv2.findContours(
+            pale_mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        contour_sources.extend((contour, True) for contour in pale_contours)
     candidates = []
 
-    for contour in contours:
+    for contour, is_pale in contour_sources:
         area = cv2.contourArea(contour)
+        if is_pale:
+            # Tiny blobs have a near-zero contour area, so size them by their bounding box.
+            _, _, pale_width, pale_height = cv2.boundingRect(contour)
+            area = max(area, pale_width * pale_height * 0.5)
         if not min_area <= area <= max_area:
             continue
         x, y, width, height = cv2.boundingRect(contour)
@@ -210,6 +233,8 @@ def detect_tennis_ball_color(
         perimeter = cv2.arcLength(contour, True)
         circularity = 4 * math.pi * area / max(perimeter * perimeter, 1)
         score = circularity + motion_fraction * 0.5
+        if is_pale:
+            score -= PALE_BALL_SCORE_PENALTY
         player_distance = distance_to_nearest_player(center, player_bboxes or [])
         if player_distance is not None and player_distance <= 120:
             score += 1.5 * (1.0 - player_distance / 120)

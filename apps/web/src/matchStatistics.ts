@@ -1,3 +1,4 @@
+import { detectEstimatedHits } from './hitDetection.ts'
 import type { FrameTelemetry } from './services/api'
 
 const courtLengthMeters = 23.77
@@ -9,11 +10,20 @@ export interface MatchStatistics {
   nearPlayerFrames: number
   ballFrames: number
   bounceCount: number
+  estimatedHitCount: number
+}
+
+export function estimateHitCount(
+  frames: FrameTelemetry[],
+  bounceTimestamps: number[] = [],
+): number {
+  return detectEstimatedHits(frames, bounceTimestamps).length
 }
 
 export function calculateMatchStatistics(
   frames: FrameTelemetry[],
   bounceCount: number,
+  bounceTimestamps: number[] = [],
 ): MatchStatistics {
   let farPlayerFrames = 0
   let nearPlayerFrames = 0
@@ -50,5 +60,6 @@ export function calculateMatchStatistics(
     nearPlayerFrames,
     ballFrames,
     bounceCount,
+    estimatedHitCount: estimateHitCount(frames, bounceTimestamps),
   }
 }

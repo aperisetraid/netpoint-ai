@@ -336,6 +336,27 @@ class FrameInspectionTests(unittest.TestCase):
         self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 160, delta=3)
         self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 100, delta=3)
 
+    def test_color_ball_fallback_detects_pale_moving_ball_on_blue_court(self):
+        previous = np.full((240, 320, 3), (170, 128, 80), dtype=np.uint8)
+        frame = previous.copy()
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.ellipse(previous, (140, 100), (3, 1), 0, 0, 360, (250, 217, 179), -1)
+        cv2.ellipse(frame, (150, 100), (3, 1), 0, 0, 360, (250, 217, 179), -1)
+
+        candidate = detect_tennis_ball_color(frame, court, previous)
+
+        self.assertIsNotNone(candidate)
+        bbox, _ = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 150, delta=3)
+        self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 100, delta=3)
+
+    def test_color_ball_fallback_ignores_static_pale_court_line(self):
+        frame = np.full((240, 320, 3), (170, 128, 80), dtype=np.uint8)
+        court = [(20, 20), (300, 20), (300, 220), (20, 220)]
+        cv2.ellipse(frame, (150, 100), (3, 1), 0, 0, 360, (250, 217, 179), -1)
+
+        self.assertIsNone(detect_tennis_ball_color(frame, court, frame.copy()))
+
     def test_color_ball_fallback_rejects_candidate_just_outside_court(self):
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         court = [(40, 20), (280, 20), (280, 220), (40, 220)]
@@ -388,6 +409,13 @@ class FrameInspectionTests(unittest.TestCase):
         self.assertAlmostEqual(center[0], 160, delta=3)
         self.assertAlmostEqual(center[1], 35, delta=3)
         self.assertTrue(point_in_ball_tracking_region(center, court))
+
+    def test_ball_tracking_region_covers_far_baseline_shorter_than_sidelines(self):
+        court = [(640, 275), (1272, 275), (1561, 845), (344, 851)]
+
+        self.assertTrue(point_in_ball_tracking_region((858, 140), court))
+        self.assertFalse(point_in_ball_tracking_region((858, 20), court))
+        self.assertFalse(point_in_ball_tracking_region((100, 140), court))
 
     def test_color_ball_fallback_keeps_tiny_moving_ball_over_static_net_color(self):
         previous = np.full((1080, 1920, 3), (40, 120, 40), dtype=np.uint8)

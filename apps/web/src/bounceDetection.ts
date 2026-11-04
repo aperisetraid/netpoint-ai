@@ -47,7 +47,7 @@ export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
       let beforeCount = 0
       let afterCount = 0
       let beforeMinY = candidate.imageY
-      let afterMinY = candidate.imageY
+      let afterEndY = candidate.imageY
       for (let previousIndex = index - 1; previousIndex >= 0; previousIndex--) {
         const sample = samples[previousIndex]
         if (candidate.frame.timestamp_seconds - sample.frame.timestamp_seconds > 0.2) break
@@ -58,11 +58,12 @@ export function detectBounces(frames: FrameTelemetry[]): Bounce[] {
         const sample = samples[nextIndex]
         if (sample.frame.timestamp_seconds - candidate.frame.timestamp_seconds > 0.2) break
         afterCount++
-        afterMinY = Math.min(afterMinY, sample.imageY)
+        afterEndY = sample.imageY
       }
       if (beforeCount < 2 || afterCount < 2) continue
       const threshold = Math.max(2, (candidate.frame.image_height ?? 720) * 0.003)
-      if (candidate.imageY - beforeMinY < threshold || candidate.imageY - afterMinY < threshold) continue
+      // The ball must still be rising at the end of the window; a wobble inside a fall is not a bounce.
+      if (candidate.imageY - beforeMinY < threshold || candidate.imageY - afterEndY < threshold) continue
 
       const centerX = (candidate.ball.bbox[0] + candidate.ball.bbox[2]) / 2
       const previous = samples[index - 1]

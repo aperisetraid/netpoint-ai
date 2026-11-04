@@ -68,6 +68,16 @@ test('does not count a reversal at a player as a bounce', () => {
   assert.deepEqual(detectBounces(frames), [])
 })
 
+test('does not count a small wobble inside a monotonic fall', () => {
+  const frames = makeFrames(positions([354, 362, 372, 384, 388, 416, 426, 422, 454, 473, 486]))
+  for (const frame of frames) {
+    frame.image_width = 1920
+    frame.image_height = 1080
+  }
+
+  assert.deepEqual(detectBounces(frames), [])
+})
+
 test('does not count a vertical peak when horizontal motion reverses too', () => {
   const frames = makeFrames(positions([90, 94, 100, 97, 94]))
   const horizontalPositions = [100, 120, 140, 120, 100]

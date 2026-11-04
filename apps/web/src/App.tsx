@@ -489,8 +489,8 @@ function App() {
   const frames = useMemo(() => analysis?.telemetry ?? [], [analysis])
   const bounces = useMemo(() => detectBounces(analysis?.telemetry ?? []), [analysis])
   const statistics: MatchStatistics = useMemo(
-    () => calculateMatchStatistics(frames, bounces.length),
-    [frames, bounces.length],
+    () => calculateMatchStatistics(frames, bounces.length, bounces.map((bounce) => bounce.timestamp)),
+    [frames, bounces],
   )
   const currentFrame = frames.reduce<FrameTelemetry | undefined>(
     (selectedFrame, frame) =>
@@ -886,6 +886,15 @@ function App() {
                   <div className="match-stats__metric">
                     <span className="match-stats__metric-label">Botes</span>
                     <strong className="match-stats__metric-value">{statistics.bounceCount.toLocaleString('es-ES')}</strong>
+                  </div>
+                  <div className="match-stats__metric">
+                    <span
+                      className="match-stats__metric-label"
+                      title="Estimación por cambios de trayectoria cerca de un jugador; no confirma el contacto con la raqueta."
+                    >
+                      Golpes estimados
+                    </span>
+                    <strong className="match-stats__metric-value">{statistics.estimatedHitCount.toLocaleString('es-ES')}</strong>
                   </div>
                 </div>
                 <div className="match-stats__coverage">
