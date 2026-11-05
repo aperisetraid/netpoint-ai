@@ -16,11 +16,15 @@ from homography import (
 
 CALIBRATION_WINDOW_FRAMES = 30
 CALIBRATION_RETRY_INTERVAL = 5
-COURT_MAX_CORNER_DISPLACEMENT_RATIO = 0.05
+COURT_MAX_CORNER_DISPLACEMENT_RATIO = 0.025
+COURT_CALIBRATION_CONFIRMATIONS = 3
 COURT_RECALIBRATION_CONFIRMATIONS = 2
 PLAYER_BASELINE_MARGIN_METERS = 6.5
 PLAYER_SIDELINE_MARGIN_METERS = 3.0
-PLAYER_OFF_COURT_MIN_CONFIDENCE = 0.4
+PLAYER_OFF_COURT_MIN_CONFIDENCE = 0.25
+PLAYER_DEEP_BASELINE_DISTANCE_METERS = 4.0
+PLAYER_DEEP_BASELINE_MIN_CONFIDENCE = 0.5
+PLAYER_SIDELINE_MIN_CONFIDENCE = 0.4
 PLAYER_SIDELINE_BASELINE_ZONE_METERS = 2.0
 PLAYER_MIN_CONFIDENCE = 0.2
 PLAYER_SIDELINE_EDGE_MARGIN_METERS = 0.5
@@ -30,6 +34,20 @@ MAX_PLAYER_CARRY_FORWARD_FRAMES = 3
 PALE_BALL_HSV_LOWER = (92, 45, 205)
 PALE_BALL_HSV_UPPER = (125, 120, 255)
 PALE_BALL_SCORE_PENALTY = 0.2
+# On clay the blurred ball blends to an orange hue, so it is only separable by being brighter than the court.
+BRIGHT_BALL_TOPHAT_KERNEL_SIZE = 9
+BRIGHT_BALL_MIN_CONTRAST = 45
+BRIGHT_BALL_MIN_VALUE = 200
+BRIGHT_BALL_SCORE_PENALTY = 0.2
+BRIGHT_BALL_MAX_STATIC_FRACTION = 0.8
+BRIGHT_BALL_CONTINUITY_PIXELS = 20
+# A fast ball is a faint streak; it is found as a spot that got brighter since the previous frame.
+MOVING_BALL_MIN_BRIGHTENING = 20
+MOVING_BALL_MIN_CONTRAST = 15
+MOVING_BALL_MIN_PIXELS = 4
+MOVING_BALL_SCORE_PENALTY = 0.4
+COURT_BALL_INFERENCE_SIZE = 960
+COURT_BALL_MIN_CONFIDENCE = 0.1
 
 
 def ball_candidate_near_player(
@@ -135,20 +153,68 @@ def player_within_tracking_region(
     y_meters: float,
     confidence: float,
 ) -> bool:
-    if not -PLAYER_BASELINE_MARGIN_METERS <= x_meters <= COURT_LENGTH_METERS + PLAYER_BASELINE_MARGIN_METERS:
+    baseline_distance = max(0.0, -x_meters, x_meters - COURT_LENGTH_METERS)
+    if baseline_distance > PLAYER_BASELINE_MARGIN_METERS:
         return False
     if not -PLAYER_SIDELINE_MARGIN_METERS <= y_meters <= COURT_WIDTH_METERS + PLAYER_SIDELINE_MARGIN_METERS:
         return False
-    if not 0 <= x_meters <= COURT_LENGTH_METERS and confidence < PLAYER_OFF_COURT_MIN_CONFIDENCE:
+    minimum_confidence = (
+        PLAYER_DEEP_BASELINE_MIN_CONFIDENCE
+        if baseline_distance > PLAYER_DEEP_BASELINE_DISTANCE_METERS
+        else PLAYER_OFF_COURT_MIN_CONFIDENCE
+    )
+    if baseline_distance > 0 and confidence < minimum_confidence:
         return False
     if 0 <= y_meters <= COURT_WIDTH_METERS:
         return True
     return (
-        confidence >= PLAYER_OFF_COURT_MIN_CONFIDENCE
+        confidence >= PLAYER_SIDELINE_MIN_CONFIDENCE
         and (
             x_meters <= PLAYER_SIDELINE_BASELINE_ZONE_METERS
             or x_meters >= COURT_LENGTH_METERS - PLAYER_SIDELINE_BASELINE_ZONE_METERS
         )
+    )
+
+
+def value_top_hat(hsv: np.ndarray) -> np.ndarray:
+    return cv2.morphologyEx(
+        hsv[:, :, 2],
+        cv2.MORPH_TOPHAT,
+        cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (BRIGHT_BALL_TOPHAT_KERNEL_SIZE, BRIGHT_BALL_TOPHAT_KERNEL_SIZE),
+        ),
+    )
+
+
+def bright_blob_mask(hsv: np.ndarray, region_mask: np.ndarray) -> np.ndarray:
+    return cv2.bitwise_and(
+        cv2.bitwise_and(
+            cv2.threshold(value_top_hat(hsv), BRIGHT_BALL_MIN_CONTRAST - 1, 255, cv2.THRESH_BINARY)[1],
+            cv2.threshold(hsv[:, :, 2], BRIGHT_BALL_MIN_VALUE - 1, 255, cv2.THRESH_BINARY)[1],
+        ),
+        region_mask,
+    )
+
+
+def bright_blob_is_static(
+    contour: np.ndarray,
+    bright_mask: np.ndarray,
+    previous_bright_mask: np.ndarray,
+    previous_ball_bbox: list[float] | None,
+) -> bool:
+    x, y, width, height = cv2.boundingRect(contour)
+    if previous_ball_bbox is not None and math.dist(
+        (x + width / 2, y + height / 2),
+        ((previous_ball_bbox[0] + previous_ball_bbox[2]) / 2, (previous_ball_bbox[1] + previous_ball_bbox[3]) / 2),
+    ) <= BRIGHT_BALL_CONTINUITY_PIXELS:
+        # A slow ball near the top of its arc overlaps its own previous position.
+        return False
+    current = bright_mask[y:y + height, x:x + width]
+    overlap = cv2.bitwise_and(current, previous_bright_mask[y:y + height, x:x + width])
+    return (
+        cv2.countNonZero(overlap) / max(1, cv2.countNonZero(current))
+        > BRIGHT_BALL_MAX_STATIC_FRACTION
     )
 
 
@@ -159,6 +225,7 @@ def detect_tennis_ball_color(
     player_bboxes: list[list[float]] | None = None,
     previous_ball_bbox: list[float] | None = None,
     previous_ball_near_player: bool = False,
+    moving_only: bool = False,
 ) -> tuple[list[float], float] | None:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
@@ -177,29 +244,75 @@ def detect_tennis_ball_color(
         difference = cv2.absdiff(frame, previous_frame)
         difference = cv2.cvtColor(difference, cv2.COLOR_BGR2GRAY)
         motion_mask = cv2.threshold(difference, 15, 255, cv2.THRESH_BINARY)[1]
-    contour_sources = [(contour, False) for contour in contours]
+    contour_sources = [] if moving_only else [(contour, 0.0) for contour in contours]
     if motion_mask is not None:
         court_fill = np.zeros(mask.shape, dtype=np.uint8)
         cv2.fillConvexPoly(court_fill, court_polygon.astype(np.int32), 255)
-        pale_mask = cv2.bitwise_and(
-            cv2.inRange(
-                hsv,
-                np.asarray(PALE_BALL_HSV_LOWER, dtype=np.uint8),
-                np.asarray(PALE_BALL_HSV_UPPER, dtype=np.uint8),
-            ),
-            court_fill,
-        )
-        pale_contours, _ = cv2.findContours(
-            pale_mask,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-        contour_sources.extend((contour, True) for contour in pale_contours)
+        previous_hsv = cv2.cvtColor(previous_frame, cv2.COLOR_BGR2HSV)
+        if moving_only:
+            moving_mask = cv2.bitwise_and(
+                cv2.bitwise_and(
+                    cv2.threshold(
+                        cv2.subtract(hsv[:, :, 2], previous_hsv[:, :, 2]),
+                        MOVING_BALL_MIN_BRIGHTENING - 1,
+                        255,
+                        cv2.THRESH_BINARY,
+                    )[1],
+                    cv2.threshold(value_top_hat(hsv), MOVING_BALL_MIN_CONTRAST - 1, 255, cv2.THRESH_BINARY)[1],
+                ),
+                court_fill,
+            )
+            moving_contours, _ = cv2.findContours(
+                moving_mask,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            for contour in moving_contours:
+                x, y, width, height = cv2.boundingRect(contour)
+                if cv2.countNonZero(moving_mask[y:y + height, x:x + width]) >= MOVING_BALL_MIN_PIXELS:
+                    contour_sources.append((contour, MOVING_BALL_SCORE_PENALTY))
+        else:
+            bright_mask = bright_blob_mask(hsv, court_fill)
+            # Lines and court signage are bright in both frames; dilation absorbs camera jitter.
+            previous_bright_mask = cv2.dilate(
+                bright_blob_mask(previous_hsv, court_fill),
+                np.ones((3, 3), dtype=np.uint8),
+            )
+            bright_contours, _ = cv2.findContours(
+                bright_mask,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            contour_sources.extend(
+                (contour, BRIGHT_BALL_SCORE_PENALTY) for contour in bright_contours
+                if not bright_blob_is_static(
+                    contour,
+                    bright_mask,
+                    previous_bright_mask,
+                    previous_ball_bbox,
+                )
+            )
+            pale_mask = cv2.bitwise_and(
+                cv2.inRange(
+                    hsv,
+                    np.asarray(PALE_BALL_HSV_LOWER, dtype=np.uint8),
+                    np.asarray(PALE_BALL_HSV_UPPER, dtype=np.uint8),
+                ),
+                court_fill,
+            )
+            pale_contours, _ = cv2.findContours(
+                pale_mask,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            contour_sources.extend(
+                (contour, PALE_BALL_SCORE_PENALTY) for contour in pale_contours
+            )
     candidates = []
 
-    for contour, is_pale in contour_sources:
+    for contour, score_penalty in contour_sources:
         area = cv2.contourArea(contour)
-        if is_pale:
+        if score_penalty:
             # Tiny blobs have a near-zero contour area, so size them by their bounding box.
             _, _, pale_width, pale_height = cv2.boundingRect(contour)
             area = max(area, pale_width * pale_height * 0.5)
@@ -232,12 +345,12 @@ def detect_tennis_ball_color(
 
         perimeter = cv2.arcLength(contour, True)
         circularity = 4 * math.pi * area / max(perimeter * perimeter, 1)
-        score = circularity + motion_fraction * 0.5
-        if is_pale:
-            score -= PALE_BALL_SCORE_PENALTY
+        score = circularity + motion_fraction * 0.5 - score_penalty
         player_distance = distance_to_nearest_player(center, player_bboxes or [])
         if player_distance is not None and player_distance <= 120:
             score += 1.5 * (1.0 - player_distance / 120)
+        if moving_only and previous_ball_bbox is None:
+            continue
         if previous_ball_bbox is not None:
             previous_center = (
                 (previous_ball_bbox[0] + previous_ball_bbox[2]) / 2,
@@ -245,6 +358,8 @@ def detect_tennis_ball_color(
             )
             distance = math.dist(center, previous_center)
             max_displacement = max(60.0, min(frame.shape[:2]) * 0.1)
+            if moving_only and distance > max_displacement:
+                continue
             if distance <= max_displacement:
                 continuity_weight = 2.0 if previous_ball_near_player else 0.15
                 score += continuity_weight * (1.0 - distance / max_displacement)
@@ -254,6 +369,44 @@ def detect_tennis_ball_color(
         return None
     circularity, _, bbox = max(candidates, key=lambda candidate: candidate[0] + candidate[1] / max_area * 0.1)
     return bbox, min(0.65, 0.45 + circularity * 0.2)
+
+
+def detect_tennis_ball_in_court(
+    frame: np.ndarray,
+    court_corners: list[tuple[int, int]],
+    model: YOLO,
+) -> tuple[list[float], float] | None:
+    height, width = frame.shape[:2]
+    court_x, court_y, court_width, court_height = cv2.boundingRect(
+        np.asarray(court_corners, dtype=np.int32)
+    )
+    padding = max(8, int(max(height, width) * 0.02))
+    left = max(0, court_x - padding)
+    top = max(0, court_y - padding)
+    right = min(width, court_x + court_width + padding)
+    bottom = min(height, court_y + court_height + padding)
+    court_crop = frame[top:bottom, left:right]
+    result = model(
+        court_crop,
+        classes=[32],
+        conf=COURT_BALL_MIN_CONFIDENCE,
+        imgsz=COURT_BALL_INFERENCE_SIZE,
+        verbose=False,
+    )[0]
+
+    candidates = []
+    for detection in result.boxes:
+        confidence = float(detection.conf[0].item())
+        x1, y1, x2, y2 = (float(value) for value in detection.xyxy[0].tolist())
+        bbox = [x1 + left, y1 + top, x2 + left, y2 + top]
+        center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+        if point_in_ball_tracking_region(center, court_corners):
+            candidates.append((confidence, bbox))
+
+    if not candidates:
+        return None
+    confidence, bbox = max(candidates, key=lambda candidate: candidate[0])
+    return bbox, confidence
 
 
 class TennisTracker:
@@ -315,36 +468,55 @@ class TennisTracker:
                 detected_corners = self.court_detector.detect_corners(frame)
                 court_corners = detected_corners
                 if detected_corners is None or len(detected_corners) != 4:
-                    pending_court_corners = None
-                    pending_court_corner_count = 0
-                else:
-                    if calibrated_corners is not None:
-                        max_displacement = max(frame.shape[:2]) * COURT_MAX_CORNER_DISPLACEMENT_RATIO
-                        displacement = mean_corner_displacement(
+                    if homography_matrix is not None:
+                        pending_court_corners = None
+                        pending_court_corner_count = 0
+                elif homography_matrix is None:
+                    max_displacement = max(frame.shape[:2]) * COURT_MAX_CORNER_DISPLACEMENT_RATIO
+                    if (
+                        pending_court_corners is not None
+                        and mean_corner_displacement(
                             detected_corners,
-                            calibrated_corners,
-                        )
-                        if displacement > max_displacement:
-                            if (
-                                pending_court_corners is not None
-                                and mean_corner_displacement(
-                                    detected_corners,
-                                    pending_court_corners,
-                                ) <= max_displacement
-                            ):
-                                pending_court_corner_count += 1
-                            else:
-                                pending_court_corners = detected_corners
-                                pending_court_corner_count = 1
+                            pending_court_corners,
+                        ) <= max_displacement
+                    ):
+                        pending_court_corner_count += 1
+                    else:
+                        pending_court_corners = detected_corners
+                        pending_court_corner_count = 1
 
-                            if pending_court_corner_count < COURT_RECALIBRATION_CONFIRMATIONS:
-                                court_corners = None
-                            else:
-                                pending_court_corners = None
-                                pending_court_corner_count = 0
+                    if pending_court_corner_count < COURT_CALIBRATION_CONFIRMATIONS:
+                        court_corners = None
+                    else:
+                        pending_court_corners = None
+                        pending_court_corner_count = 0
+                else:
+                    max_displacement = max(frame.shape[:2]) * COURT_MAX_CORNER_DISPLACEMENT_RATIO
+                    displacement = mean_corner_displacement(
+                        detected_corners,
+                        calibrated_corners,
+                    )
+                    if displacement > max_displacement:
+                        if (
+                            pending_court_corners is not None
+                            and mean_corner_displacement(
+                                detected_corners,
+                                pending_court_corners,
+                            ) <= max_displacement
+                        ):
+                            pending_court_corner_count += 1
+                        else:
+                            pending_court_corners = detected_corners
+                            pending_court_corner_count = 1
+
+                        if pending_court_corner_count < COURT_RECALIBRATION_CONFIRMATIONS:
+                            court_corners = None
                         else:
                             pending_court_corners = None
                             pending_court_corner_count = 0
+                    else:
+                        pending_court_corners = None
+                        pending_court_corner_count = 0
 
                 if court_corners is not None and len(court_corners) == 4:
                     try:
@@ -422,8 +594,7 @@ class TennisTracker:
                 if class_id == 32:
                     ball_candidates.append(detection)
                     continue
-                if homography_matrix is None or class_id != 0:
-                    detections.append(detection)
+                if homography_matrix is None:
                     continue
 
                 side = (
@@ -496,6 +667,22 @@ class TennisTracker:
                     previous_ball_bbox,
                     previous_ball_near_player,
                 )
+                if ball_candidate is None:
+                    ball_candidate = detect_tennis_ball_in_court(
+                        frame,
+                        calibrated_corners,
+                        self.model,
+                    )
+                if ball_candidate is None:
+                    ball_candidate = detect_tennis_ball_color(
+                        frame,
+                        calibrated_corners,
+                        previous_video_frame,
+                        player_bboxes,
+                        previous_ball_bbox,
+                        previous_ball_near_player,
+                        moving_only=True,
+                    )
                 if ball_candidate is not None:
                     bbox, confidence = ball_candidate
                     x1, y1, x2, y2 = bbox

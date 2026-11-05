@@ -14,6 +14,7 @@ from tracker import (
     TennisTracker,
     ball_candidate_near_player,
     detect_tennis_ball_color,
+    detect_tennis_ball_in_court,
     point_in_ball_tracking_region,
     player_within_tracking_region,
 )
@@ -27,7 +28,7 @@ class FrameInspectionTests(unittest.TestCase):
         writer = cv2.VideoWriter(
             str(self.video_path), cv2.VideoWriter_fourcc(*"mp4v"), 25, (64, 48)
         )
-        for intensity in (30, 180):
+        for intensity in (30, 180, 90):
             writer.write(np.full((48, 64, 3), intensity, dtype=np.uint8))
         writer.release()
         self.addCleanup(server.processed_videos.clear)
@@ -58,13 +59,13 @@ class FrameInspectionTests(unittest.TestCase):
             return_value=([30.0, 20.0, 34.0, 24.0], 0.6),
         ):
             telemetry = tracker.process_video(str(self.video_path))
-        self.assertEqual(len(telemetry), 2)
+        self.assertEqual(len(telemetry), 3)
         self.assertEqual(telemetry[1]["image_width"], 64)
         self.assertEqual(telemetry[1]["image_height"], 48)
-        self.assertEqual(telemetry[1]["court_corners"], corners)
+        self.assertEqual(telemetry[2]["court_corners"], corners)
         self.assertTrue(any(
             detection["class"] == "ball"
-            for detection in telemetry[1]["detections"]
+            for detection in telemetry[2]["detections"]
         ))
 
     def test_tracker_refreshes_court_calibration_every_five_frames(self):
@@ -92,8 +93,55 @@ class FrameInspectionTests(unittest.TestCase):
         )
 
         self.assertEqual(len(telemetry), 12)
-        self.assertEqual(len(detected_frames), 3)
+        self.assertEqual(len(detected_frames), 5)
         self.assertEqual(progress_updates, [(0, 12), (5, 12), (10, 12), (12, 12)])
+
+    def test_tracker_waits_for_stable_initial_court_calibration(self):
+        video_path = Path(self.directory.name) / "unstable-court-video.mp4"
+        writer = cv2.VideoWriter(
+            str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 25, (64, 48)
+        )
+        for _ in range(8):
+            writer.write(np.zeros((48, 64, 3), dtype=np.uint8))
+        writer.release()
+
+        tracker = TennisTracker.__new__(TennisTracker)
+        tracker.target_classes = [0, 32]
+        tracker.model = lambda *args, **kwargs: [SimpleNamespace(boxes=[])]
+        incorrect_corners = [(5, 0), (58, 0), (58, 47), (5, 47)]
+        correct_corners = [(0, 0), (63, 0), (63, 47), (0, 47)]
+        candidates = iter((None, incorrect_corners, None, incorrect_corners,
+                           correct_corners, None, correct_corners, correct_corners))
+        tracker.court_detector = SimpleNamespace(
+            detect_corners=lambda frame: next(candidates)
+        )
+
+        telemetry = tracker.process_video(str(video_path))
+
+        self.assertTrue(all(frame["court_corners"] is None for frame in telemetry[:7]))
+        self.assertEqual(telemetry[7]["court_corners"], correct_corners)
+
+    def test_tracker_ignores_people_until_court_is_calibrated(self):
+        tracker = TennisTracker.__new__(TennisTracker)
+        tracker.target_classes = [0, 32]
+        boxes = [
+            SimpleNamespace(
+                cls=np.asarray([0]),
+                conf=np.asarray([0.9 - index * 0.01]),
+                xyxy=np.asarray([[index * 8, 10, index * 8 + 6, 40]], dtype=np.float32),
+            )
+            for index in range(6)
+        ]
+        tracker.model = lambda *args, **kwargs: [SimpleNamespace(boxes=boxes)]
+        tracker.court_detector = SimpleNamespace(detect_corners=lambda frame: None)
+
+        telemetry = tracker.process_video(str(self.video_path))
+
+        self.assertTrue(all(
+            detection["class"] != "player"
+            for frame in telemetry
+            for detection in frame["detections"]
+        ))
 
     def test_tracker_ignores_isolated_court_calibration_outlier(self):
         video_path = Path(self.directory.name) / "outlier-video.mp4"
@@ -109,7 +157,7 @@ class FrameInspectionTests(unittest.TestCase):
         tracker.model = lambda *args, **kwargs: [SimpleNamespace(boxes=[])]
         corners = [(0, 0), (63, 0), (63, 47), (0, 47)]
         outlier = [(12, 0), (63, 0), (63, 47), (12, 47)]
-        detections = iter((corners, outlier, corners, outlier, outlier))
+        detections = iter((corners, corners, corners, outlier, corners, outlier, outlier))
         tracker.court_detector = SimpleNamespace(
             detect_corners=lambda frame: next(detections)
         )
@@ -117,7 +165,8 @@ class FrameInspectionTests(unittest.TestCase):
         telemetry = tracker.process_video(str(video_path))
 
         self.assertEqual(len(telemetry), 22)
-        self.assertTrue(all(frame["court_corners"] == corners for frame in telemetry[:20]))
+        self.assertTrue(all(frame["court_corners"] is None for frame in telemetry[:2]))
+        self.assertTrue(all(frame["court_corners"] == corners for frame in telemetry[2:20]))
         self.assertTrue(all(frame["court_corners"] == outlier for frame in telemetry[20:]))
 
     def test_video_progress_endpoint_returns_current_frame_count(self):
@@ -150,7 +199,7 @@ class FrameInspectionTests(unittest.TestCase):
 
         player = next(
             detection
-            for detection in telemetry[0]["detections"]
+            for detection in telemetry[2]["detections"]
             if detection["class"] == "player"
         )
         self.assertGreater(player["x_meters"], 23.77)
@@ -172,13 +221,15 @@ class FrameInspectionTests(unittest.TestCase):
 
         player = next(
             detection
-            for detection in telemetry[0]["detections"]
+            for detection in telemetry[2]["detections"]
             if detection["class"] == "player"
         )
         self.assertGreaterEqual(player["x_meters"], -PLAYER_BASELINE_MARGIN_METERS)
         self.assertLess(player["x_meters"], 0)
 
     def test_player_deep_behind_baseline_requires_confidence_and_stays_bounded(self):
+        self.assertTrue(player_within_tracking_region(26.19, 5.14, 0.275))
+        self.assertFalse(player_within_tracking_region(29.13, 9.2, 0.412))
         self.assertTrue(player_within_tracking_region(-5.43, 3.62, 0.565))
         self.assertFalse(player_within_tracking_region(-5.43, 3.62, 0.3))
         self.assertFalse(player_within_tracking_region(-6.6, 3.62, 0.9))
@@ -221,7 +272,7 @@ class FrameInspectionTests(unittest.TestCase):
         model_frame = [0]
 
         def model(*args, **kwargs):
-            boxes = [box] if model_frame[0] == 0 else []
+            boxes = [box] if model_frame[0] < 3 else []
             model_frame[0] += 1
             return [SimpleNamespace(boxes=boxes)]
 
@@ -233,11 +284,11 @@ class FrameInspectionTests(unittest.TestCase):
 
         self.assertTrue(any(
             detection.get("carried_forward")
-            for detection in telemetry[3]["detections"]
+            for detection in telemetry[5]["detections"]
         ))
         self.assertFalse(any(
             detection["class"] == "player"
-            for detection in telemetry[4]["detections"]
+            for detection in telemetry[6]["detections"]
         ))
 
     def test_upload_stream_is_saved_and_processed_from_disk(self):
@@ -284,6 +335,39 @@ class FrameInspectionTests(unittest.TestCase):
         court = [(20, 20), (300, 20), (300, 220), (20, 220)]
 
         self.assertIsNone(detect_tennis_ball_color(frame, court))
+
+    def test_court_ball_detector_uses_high_resolution_and_rejects_outside_candidate(self):
+        frame = np.zeros((200, 200, 3), dtype=np.uint8)
+        court = [(20, 20), (180, 20), (180, 180), (20, 180)]
+
+        class FakeModel:
+            def __call__(self, crop, **kwargs):
+                self.kwargs = kwargs
+                height, width = crop.shape[:2]
+                return [SimpleNamespace(boxes=[
+                    SimpleNamespace(
+                        conf=np.asarray([0.9]),
+                        xyxy=np.asarray([[0, 0, 8, 8]], dtype=np.float32),
+                    ),
+                    SimpleNamespace(
+                        conf=np.asarray([0.2]),
+                        xyxy=np.asarray([
+                            [width / 2 - 4, height / 2 - 4, width / 2 + 4, height / 2 + 4]
+                        ], dtype=np.float32),
+                    ),
+                ])]
+
+        model = FakeModel()
+
+        candidate = detect_tennis_ball_in_court(frame, court, model)
+
+        self.assertIsNotNone(candidate)
+        bbox, confidence = candidate
+        self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 100, delta=1)
+        self.assertAlmostEqual((bbox[1] + bbox[3]) / 2, 100, delta=1)
+        self.assertEqual(confidence, 0.2)
+        self.assertEqual(model.kwargs["classes"], [32])
+        self.assertEqual(model.kwargs["imgsz"], 960)
 
     def test_color_ball_fallback_detects_motion_blurred_ball(self):
         frame = np.full((240, 320, 3), (40, 120, 40), dtype=np.uint8)

@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   ChartNoAxesCombined,
   CheckCircle2,
+  Gauge,
+  ListOrdered,
   Moon,
   Radar,
   RefreshCw,
@@ -24,6 +26,8 @@ import {
 } from './services/api'
 import { detectBounces, getVisibleBounces, type Bounce } from './bounceDetection'
 import { calculateMatchStatistics, type MatchStatistics } from './matchStatistics'
+import { detectEstimatedHits } from './hitDetection'
+import { calculateShotStatistics, type PlayerSide, type ShotType } from './matchStats'
 import './App.css'
 
 interface YouTubePlayer {
@@ -79,6 +83,18 @@ const courtLength = 23.77
 const courtWidth = 10.97
 const maximumVideoSizeBytes = 1024 * 1024 * 1024
 let youtubeApiPromise: Promise<YouTubeApi> | null = null
+const shotTypes = [
+  ['serve', 'Saque'],
+  ['volley', 'Volea'],
+  ['forehand', 'Derecha'],
+  ['backhand', 'Revés'],
+] as const satisfies readonly (readonly [ShotType, string])[]
+const shotTypeLabels: Record<ShotType, string> = Object.fromEntries(shotTypes) as Record<ShotType, string>
+const playerSides: readonly PlayerSide[] = ['far', 'near']
+
+function formatSpeed(value: number | null): string {
+  return value === null ? '--' : `${Math.round(value)} km/h`
+}
 
 function formatPercent(value: number): string {
   return `${Math.round(value)}%`
@@ -492,6 +508,15 @@ function App() {
     () => calculateMatchStatistics(frames, bounces.length, bounces.map((bounce) => bounce.timestamp)),
     [frames, bounces],
   )
+  const shotStatistics = useMemo(
+    () => calculateShotStatistics(
+      frames,
+      bounces,
+      detectEstimatedHits(frames, bounces.map((bounce) => bounce.timestamp)),
+    ),
+    [frames, bounces],
+  )
+  const playerLabel = (side: PlayerSide) => playerNames[side] || (side === 'far' ? 'Fondo' : 'Cámara')
   const currentFrame = frames.reduce<FrameTelemetry | undefined>(
     (selectedFrame, frame) =>
       frame.timestamp_seconds <= currentTime ? frame : selectedFrame,
@@ -880,10 +905,6 @@ function App() {
                     <strong className="match-stats__metric-value">{formatTime(statistics.durationSeconds)}</strong>
                   </div>
                   <div className="match-stats__metric">
-                    <span className="match-stats__metric-label">Fotogramas</span>
-                    <strong className="match-stats__metric-value">{statistics.frameCount.toLocaleString('es-ES')}</strong>
-                  </div>
-                  <div className="match-stats__metric">
                     <span className="match-stats__metric-label">Botes</span>
                     <strong className="match-stats__metric-value">{statistics.bounceCount.toLocaleString('es-ES')}</strong>
                   </div>
@@ -894,8 +915,68 @@ function App() {
                     >
                       Golpes estimados
                     </span>
-                    <strong className="match-stats__metric-value">{statistics.estimatedHitCount.toLocaleString('es-ES')}</strong>
+                    <strong className="match-stats__metric-value">{shotStatistics.match.totalShots.toLocaleString('es-ES')}</strong>
                   </div>
+                  <div className="match-stats__metric">
+                    <span
+                      className="match-stats__metric-label"
+                      title="Estimada con la proyección de la pelota sobre la pista; puede sobrestimar golpes altos."
+                    >
+                      Vel. máxima
+                    </span>
+                    <strong className="match-stats__metric-value">{formatSpeed(shotStatistics.match.maxSpeedKmh)}</strong>
+                  </div>
+                </div>
+                <div className="match-stats__coverage">
+                  <div className="match-stats__coverage-heading">
+                    <h3><Gauge size={16} /> Golpes por jugador</h3>
+                    <span>{shotStatistics.match.pointCount.toLocaleString('es-ES')} puntos</span>
+                  </div>
+                  <div className="shot-table__wrapper">
+                    <table className="shot-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Jugador</th>
+                          {shotTypes.map(([type, label]) => <th key={type} scope="col">{label}</th>)}
+                          <th scope="col">Máx.</th>
+                          <th scope="col">Media</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {playerSides.map((side) => {
+                          const summary = shotStatistics.byPlayer[side]
+                          return (
+                            <tr key={side}>
+                              <th scope="row" title={playerLabel(side)}>{playerLabel(side)}</th>
+                              {shotTypes.map(([type]) => <td key={type}>{summary.byType[type]}</td>)}
+                              <td>{formatSpeed(summary.maxSpeedKmh)}</td>
+                              <td>{formatSpeed(summary.averageSpeedKmh)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="match-stats__coverage">
+                  <div className="match-stats__coverage-heading">
+                    <h3><ListOrdered size={16} /> Registro de golpes</h3>
+                    <span>{shotStatistics.match.measuredShots}/{shotStatistics.match.totalShots} con velocidad</span>
+                  </div>
+                  {shotStatistics.shots.length ? (
+                    <ol className="shot-log">
+                      {shotStatistics.shots.map((shot) => (
+                        <li key={`${shot.frameIndex}-${shot.player}`} className={shot.timestamp <= currentTime ? 'is-past' : undefined}>
+                          <span className="shot-log__time">{formatTime(shot.timestamp)}</span>
+                          <span className={`shot-log__type shot-log__type--${shot.type}`}>{shotTypeLabels[shot.type]}</span>
+                          <span className="shot-log__player" title={playerLabel(shot.player)}>{playerLabel(shot.player)}</span>
+                          <strong>{formatSpeed(shot.speedKmh)}</strong>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="shot-log__empty">No se detectaron golpes en este video.</p>
+                  )}
                 </div>
                 <div className="match-stats__coverage">
                   <div className="match-stats__coverage-heading">
