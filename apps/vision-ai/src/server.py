@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 import library
+from coach.api import create_coach_router
 from main import process_video_file, run_pipeline
 
 
@@ -147,6 +148,20 @@ async def process_video_upload(
 @app.get("/matches/{match_id}/progress")
 async def get_video_progress(match_id: str):
     return get_match_progress(match_id)
+
+
+def resolve_analysis_folder(match_id: str) -> Path | None:
+    """Library folder of a match: by its library id, or by the id a fresh analysis was started with."""
+    folder = library.resolve_match_dir(match_video_root, match_id)
+    if folder is not None:
+        return folder
+    video = processed_videos.get(match_id)
+    if video is not None and (video[0].parent / library.TELEMETRY_FILE).is_file():
+        return video[0].parent
+    return None
+
+
+app.include_router(create_coach_router(resolve_analysis_folder))
 
 
 def get_library_folder(match_id: str) -> Path:

@@ -43,6 +43,18 @@ MIN_TRACKLET_SECONDS = 0.12
 MIN_TRACKLET_TRAVEL_WIDTH_RATIO = 0.015
 MIN_TRACKLET_TRAVEL_PIXELS = 8.0
 MIN_TRACKLET_SCORE = 3.0
+# Shoes, a shadow or the racket move with a player, not relative to them. A tracklet that stays
+# this close to a player (in player heights) in most of its frames, and moves relative to them
+# much less than it moves on screen, belongs to the player. The ball is far faster than a player,
+# so even near the racket it moves relative to them about as much as on screen. The ratio, not a
+# fixed distance, because the player's box jitters as the racket arm extends.
+PLAYER_ATTACHED_MAX_HEIGHTS = 1.0
+PLAYER_ATTACHED_MIN_FRACTION = 0.8
+PLAYER_ATTACHED_MAX_RELATIVE_TRAVEL = 0.5
+# A running player makes the frame-difference detector fire all around them (shadow, shoes, the
+# edges of the body), so a tracklet next to a player that only that detector supports is not
+# trusted; the real ball there is also seen by the colour or YOLO detectors.
+UNCORROBORATED_SOURCES = {"motion"}
 SOURCE_WEIGHTS = {"yolo": 1.0, "yolo_court": 1.0, "color": 0.6, "motion": 0.5}
 
 # Gaps between two tracklets are bridged when both sides agree on where the ball went.
@@ -157,6 +169,31 @@ class _Stabilizer:
                 self.cache[key] = None
         return self.cache[key]
 
+    def relative_to_player(self, track: Sequence[BallCandidate]) -> list[tuple[float, float]] | None:
+        """Offsets from the feet of the nearest player, or None when the track keeps away from them."""
+        offsets = []
+        for point in track:
+            boxes = [
+                detection["bbox"] for detection in self.frames[point.frame_position]["detections"]
+                if detection["class"] == "player"
+            ]
+            if not boxes:
+                continue
+            box = min(
+                boxes,
+                key=lambda candidate: math.hypot(
+                    point.x - (candidate[0] + candidate[2]) / 2, point.y - (candidate[1] + candidate[3]) / 2
+                ),
+            )
+            height = max(box[3] - box[1], 1.0)
+            gap = math.hypot(max(box[0] - point.x, 0.0, point.x - box[2]), max(box[1] - point.y, 0.0, point.y - box[3]))
+            if gap > PLAYER_ATTACHED_MAX_HEIGHTS * height:
+                continue
+            offsets.append((point.x - (box[0] + box[2]) / 2, point.y - box[3]))
+        if len(offsets) < PLAYER_ATTACHED_MIN_FRACTION * len(track):
+            return None
+        return offsets
+
     def positions(self, track: Sequence[BallCandidate]) -> list[tuple[float, float]]:
         raw = [(point.x, point.y) for point in track]
         homographies = [self._image_to_court(point.frame_position) for point in track]
@@ -189,12 +226,26 @@ def _score(track: Sequence[BallCandidate]) -> float:
 
 
 def _is_ball_like(track: Sequence[BallCandidate], stabilizer: _Stabilizer, limits: _Limits) -> bool:
+    # Scenery (a logo, a line) stays put once the camera motion is removed; broadcast graphics
+    # (the scoreboard) stay put on screen. The ball has to travel in both.
     return (
         len(track) >= MIN_TRACKLET_SUPPORTS
         and track[-1].time - track[0].time >= MIN_TRACKLET_SECONDS
         and _score(track) >= MIN_TRACKLET_SCORE
         and _travel(stabilizer.positions(track)) >= limits.min_travel
+        and _travel([(point.x, point.y) for point in track]) >= limits.min_travel
+        and not _moves_with_a_player(track, stabilizer, limits)
     )
+
+
+def _moves_with_a_player(track: Sequence[BallCandidate], stabilizer: _Stabilizer, limits: _Limits) -> bool:
+    offsets = stabilizer.relative_to_player(track)
+    if offsets is None:
+        return False
+    if all(point.source in UNCORROBORATED_SOURCES for point in track):
+        return True
+    screen_travel = _travel([(point.x, point.y) for point in track])
+    return _travel(offsets) < max(limits.min_travel, PLAYER_ATTACHED_MAX_RELATIVE_TRAVEL * screen_travel)
 
 
 def build_tracklets(

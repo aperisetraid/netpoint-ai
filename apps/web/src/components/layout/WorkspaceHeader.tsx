@@ -1,4 +1,4 @@
-import { ChevronDown, Home, Library, Plus } from 'lucide-react'
+import { ChevronDown, Home, Library, Plus, Sparkles } from 'lucide-react'
 
 import { type Theme, ThemeToggle } from './ThemeToggle'
 
@@ -10,8 +10,12 @@ interface WorkspaceHeaderProps {
   frameCount: number | null
   theme: Theme
   sourceOpen: boolean
+  coachOpen: boolean
+  /** The coach needs an analysed match to talk about. */
+  coachEnabled: boolean
   onThemeChange: (theme: Theme) => void
   onToggleSource: () => void
+  onToggleCoach: () => void
   onHome: () => void
   onLibrary: () => void
 }
@@ -19,7 +23,8 @@ interface WorkspaceHeaderProps {
 const statusLabels = { idle: 'En espera', processing: 'Procesando', completed: 'Procesado' } as const
 
 export function WorkspaceHeader({
-  title, status, frameCount, theme, sourceOpen, onThemeChange, onToggleSource, onHome, onLibrary,
+  title, status, frameCount, theme, sourceOpen, coachOpen, coachEnabled,
+  onThemeChange, onToggleSource, onToggleCoach, onHome, onLibrary,
 }: WorkspaceHeaderProps) {
   return (
     <header className="workspace-header">
@@ -37,6 +42,18 @@ export function WorkspaceHeader({
         </span>
       </div>
 
+      <button
+        type="button"
+        className="coach-trigger"
+        aria-pressed={coachOpen}
+        aria-controls="side-panel"
+        disabled={!coachEnabled}
+        onClick={onToggleCoach}
+        title={coachEnabled ? 'Conversar con el coach táctico' : 'Analiza o abre un partido para hablar con el coach'}
+      >
+        <Sparkles size={15} aria-hidden="true" />
+        <span>Coach</span>
+      </button>
       <button type="button" className="library-link" onClick={onLibrary} title="Partidos analizados">
         <Library size={15} aria-hidden="true" />
         <span>Biblioteca</span>

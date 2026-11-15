@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NetPoint AI API
-  description: API REST para el procesado de partidos de tenis, extracción de telemetría y consulta táctica multi-agente.
+  description: API REST para el procesado de partidos de tenis, extracción de telemetría y coach táctico conversacional.
   version: 1.0.0
   license:
     name: MIT
@@ -197,36 +197,77 @@ paths:
         '404':
           $ref: '#/components/responses/404NotFound'
 
-  /matches/{matchId}/chat:
+  /matches/{matchId}/coach:
+    parameters:
+      - $ref: '#/components/parameters/MatchId'
+    get:
+      summary: Estado del coach táctico de un partido
+      description: Devuelve la conversación guardada junto al análisis, si hay credenciales de Claude configuradas, y datos deterministas para iniciar la charla (récords y preguntas sugeridas).
+      operationId: getCoachSession
+      responses:
+        '200':
+          description: Sesión del coach.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoachSession'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422Unprocessable'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
+    delete:
+      summary: Reiniciar la conversación con el coach
+      operationId: resetCoachSession
+      responses:
+        '204':
+          description: Conversación eliminada.
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '409':
+          $ref: '#/components/responses/409Conflict'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
+
+  /matches/{matchId}/coach/messages:
+    parameters:
+      - $ref: '#/components/parameters/MatchId'
     post:
-      summary: Consulta conversacional al sistema Multi-Agente
-      description: Endpoint planificado, aún no implementado. Envía preguntas en lenguaje natural sobre el partido al pool de agentes (Táctico, Biomecánico, Estratégico).
-      operationId: queryAgentChat
-      x-implementation-status: planned
-      parameters:
-        - name: matchId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      summary: Preguntar al coach táctico (respuesta en streaming)
+      description: |
+        Envía una pregunta en lenguaje natural sobre el partido. La respuesta llega como Server-Sent Events;
+        cada evento `data:` es un JSON con `type`:
+        - `text` (`delta`): fragmento de la respuesta.
+        - `replace` (`text`): sustituye el borrador visible (una ronda se repitió).
+        - `status` (`label`): progreso (consultas a la telemetría y notas del coach).
+        - `done` (`question`, `message`): turno guardado en la conversación.
+        - `error` (`message`): el turno falló y no se guardó nada.
+        Los instantes del vídeo se citan en Markdown como `[m:ss](#t=SEGUNDOS)`.
+      operationId: postCoachMessage
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChatQueryRequest'
+              $ref: '#/components/schemas/CoachMessageRequest'
       responses:
         '200':
-          description: Respuesta generada por los agentes.
+          description: Flujo de eventos de la respuesta.
           content:
-            application/json:
+            text/event-stream:
               schema:
-                $ref: '#/components/schemas/ChatQueryResponse'
+                type: string
         '400':
           $ref: '#/components/responses/400BadRequest'
         '404':
           $ref: '#/components/responses/404NotFound'
+        '409':
+          $ref: '#/components/responses/409Conflict'
+        '422':
+          $ref: '#/components/responses/422Unprocessable'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
 
 components:
   schemas:
@@ -568,34 +609,101 @@ components:
           nullable: true
           description: Altura estimada de la pelota por ajuste balístico; null si no se pudo reconstruir.
 
-    ChatQueryRequest:
+    CoachMessageRequest:
       type: object
       additionalProperties: false
-      required:
-        - prompt
+      required: [message]
       properties:
-        prompt:
+        message:
           type: string
           minLength: 1
-          example: "¿Por qué estoy perdiendo puntos cuando juego cruzado desde el fondo?"
+          maxLength: 4000
+          example: "¿Qué patrón se repite cuando me atacan el revés?"
+        players:
+          type: object
+          additionalProperties: false
+          description: Nombres de los jugadores de cada lado.
+          properties:
+            far:
+              type: string
+              maxLength: 80
+            near:
+              type: string
+              maxLength: 80
+        perspective:
+          type: string
+          nullable: true
+          enum: [far, near, coach]
+          description: Quién pregunta. "yo" se refiere a este jugador; coach = entrenador o analista.
+        currentTime:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Posición del reproductor en segundos; da sentido a "este punto".
 
-    ChatQueryResponse:
+    CoachTranscriptEntry:
       type: object
-      additionalProperties: false
-      required:
-        - answer
-        - agentRole
+      required: [id, role, text, createdAt, tools]
       properties:
-        answer:
+        id:
           type: string
-          example: "Has realizado 14 tiros cruzados. En un 65% de los casos la bola cayó corta..."
-        agentRole:
+        role:
           type: string
-          example: "Agente Táctico"
-        recommendations:
+          enum: [user, assistant]
+        text:
+          type: string
+          description: Markdown; los instantes del vídeo se enlazan como [m:ss](#t=SEGUNDOS).
+        createdAt:
+          type: string
+          format: date-time
+        tools:
           type: array
           items:
             type: string
+          description: Consultas a la telemetría que respaldan la respuesta.
+
+    CoachHighlight:
+      type: object
+      required: [label, value, detail, time]
+      properties:
+        label:
+          type: string
+          example: "Punto más largo"
+        value:
+          type: string
+          example: "17 golpes"
+        detail:
+          type: string
+          example: "P2 · 23 s"
+        time:
+          type: number
+          description: Segundo del vídeo al que salta.
+
+    CoachSession:
+      type: object
+      required: [available, model, messages, highlights, suggestions, reportPrompt]
+      properties:
+        available:
+          type: boolean
+          description: Hay credenciales de Anthropic configuradas en el servicio de visión.
+        model:
+          type: string
+          example: "claude-opus-5-5"
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoachTranscriptEntry'
+        highlights:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoachHighlight'
+        suggestions:
+          type: array
+          items:
+            type: string
+        reportPrompt:
+          type: string
+          description: Pregunta que genera el informe táctico completo.
 
     ErrorResponse:
       type: object
@@ -604,6 +712,15 @@ components:
       properties:
         message:
           type: string
+
+  parameters:
+    MatchId:
+      name: matchId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     400BadRequest:
@@ -614,6 +731,18 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     404NotFound:
       description: El recurso solicitado no existe.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    409Conflict:
+      description: El coach todavía está respondiendo a otra pregunta de este partido.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    422Unprocessable:
+      description: La telemetría guardada no es compatible con el coach.
       content:
         application/json:
           schema:

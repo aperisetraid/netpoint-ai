@@ -478,3 +478,86 @@ test('upload endpoint rejects unsupported file extensions', async () => {
   });
   assert.equal(response.statusCode, 415);
 });
+test('coach endpoints proxy the session, stream SSE untouched and reset', async () => {
+  const matchId = '8b0c1e7a-3f2d-4c55-9a1b-2d3e4f5a6b7c';
+  const session = {
+    available: true,
+    model: 'claude-opus-5-5',
+    messages: [],
+    highlights: [{ label: 'Punto más largo', value: '9 golpes', detail: 'P2 · 14 s', time: 6.68 }],
+    suggestions: ['¿Cuál fue el intercambio más largo?'],
+    reportPrompt: 'Informe',
+  };
+  const sse = 'data: {"type":"text","delta":"Hola"}\n\ndata: {"type":"done"}\n\n';
+  const calls: Array<{ url: string; method: string; body?: string }> = [];
+  const coachApp = await buildApp({
+    fetchImpl: async (input, init) => {
+      calls.push({ url: String(input), method: init?.method ?? 'GET', body: init?.body as string | undefined });
+      if (init?.method === 'POST') {
+        return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify(session), { headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  const sessionResponse = await coachApp.inject({ method: 'GET', url: `/api/v1/matches/${matchId}/coach` });
+  assert.equal(sessionResponse.statusCode, 200);
+  assert.deepEqual(sessionResponse.json(), session);
+
+  const payload = { message: '¿Quién sacó mejor?', perspective: 'near', currentTime: 12.5, players: { far: 'Ana', near: 'Bea' } };
+  const streamResponse = await coachApp.inject({
+    method: 'POST',
+    url: `/api/v1/matches/${matchId}/coach/messages`,
+    payload,
+  });
+  assert.equal(streamResponse.statusCode, 200);
+  assert.match(String(streamResponse.headers['content-type']), /^text\/event-stream/);
+  assert.equal(streamResponse.body, sse);
+  assert.equal(calls[1].url, `http://localhost:8000/coach/${matchId}/messages`);
+  assert.deepEqual(JSON.parse(String(calls[1].body)), payload);
+
+  const resetResponse = await coachApp.inject({ method: 'DELETE', url: `/api/v1/matches/${matchId}/coach` });
+  assert.equal(resetResponse.statusCode, 204);
+  assert.equal(calls[2].method, 'DELETE');
+
+  await coachApp.close();
+});
+
+test('coach endpoints validate input and map vision errors', async () => {
+  const matchId = '8b0c1e7a-3f2d-4c55-9a1b-2d3e4f5a6b7c';
+  const status = { current: 404, detail: '' };
+  const coachApp = await buildApp({
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ detail: status.detail }), {
+        status: status.current,
+        headers: { 'content-type': 'application/json' },
+      }),
+  });
+  const offlineApp = await buildApp({
+    fetchImpl: async () => {
+      throw new Error('offline');
+    },
+  });
+  const post = (app: typeof coachApp, payload: unknown, id = matchId) =>
+    app.inject({ method: 'POST', url: `/api/v1/matches/${id}/coach/messages`, payload: payload as object });
+
+  assert.equal((await post(coachApp, { message: '' })).statusCode, 400);
+  assert.equal((await post(coachApp, { message: 'x', perspective: 'umpire' })).statusCode, 400);
+  assert.equal((await post(coachApp, { message: 'x' }, 'not-a-uuid')).statusCode, 400);
+
+  assert.equal((await post(coachApp, { message: 'x' })).statusCode, 404);
+  status.current = 409;
+  status.detail = 'El coach todavía está respondiendo en este partido.';
+  const busy = await post(coachApp, { message: 'x' });
+  assert.equal(busy.statusCode, 409);
+  assert.equal(busy.json().message, status.detail);
+  status.current = 500;
+  assert.equal((await coachApp.inject({ method: 'GET', url: `/api/v1/matches/${matchId}/coach` })).statusCode, 502);
+  assert.equal((await post(offlineApp, { message: 'x' })).statusCode, 502);
+
+  await coachApp.close();
+  await offlineApp.close();
+});

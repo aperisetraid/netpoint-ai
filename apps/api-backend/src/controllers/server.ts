@@ -10,6 +10,7 @@ import { load as loadYaml } from 'js-yaml';
 import type { MatchRegistry } from '../domain/match.entity.js';
 import { InMemoryMatchRegistry } from '../infrastructure/in-memory-match.registry.js';
 import { registerRoutes } from './routes.js';
+import { CoachUseCase } from '../use-cases/coach.usecase.js';
 import { GetTelemetryUseCase } from '../use-cases/get-telemetry.usecase.js';
 import { LibraryUseCase } from '../use-cases/library.usecase.js';
 import { ProcessMatchUseCase } from '../use-cases/process-match.usecase.js';
@@ -64,6 +65,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     processMatchUseCase,
     getTelemetryUseCase,
     libraryUseCase: new LibraryUseCase({ fetchImpl: options.fetchImpl }),
+    coachUseCase: new CoachUseCase({ fetchImpl: options.fetchImpl }),
   });
 
   return app;

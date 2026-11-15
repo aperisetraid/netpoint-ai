@@ -117,6 +117,35 @@ class BallTrackingTests(unittest.TestCase):
         track_ball(frames, [[candidate(640 + 6 * index, 400)] for index in range(30)], WIDTH)
         self.assertEqual(len(balls(frames)), 30)
 
+    def test_rejects_a_scoreboard_that_stays_on_screen_while_the_camera_pans(self):
+        def panned(index):
+            return [(x + 6 * index, y) for x, y in COURT]
+
+        # Fixed on screen, so it drifts against the panning court: only the screen test stops it.
+        frames = make_frames(30, panned)
+        track_ball(frames, [[candidate(640, 400)] for _ in range(30)], WIDTH)
+        self.assertEqual(balls(frames), {})
+
+    def test_rejects_a_blob_that_moves_with_a_player(self):
+        def player_at(index):
+            x = 400 + 9 * index
+            return {"class": "player", "confidence": 0.9, "bbox": [x - 30, 460, x + 30, 600],
+                    "x_meters": 5.0, "y_meters": 20.0}
+
+        # A shoe or a shadow: next to the feet, following them as the player runs.
+        frames = make_frames(30)
+        for index, frame in enumerate(frames):
+            frame["detections"].append(player_at(index))
+        track_ball(frames, [[candidate(400 + 9 * index - 45, 602)] for index in range(30)], WIDTH)
+        self.assertEqual(balls(frames), {})
+
+        # The ball leaving the same player moves relative to them and is kept.
+        frames = make_frames(30)
+        for index, frame in enumerate(frames):
+            frame["detections"].append(player_at(index))
+        track_ball(frames, [[candidate(*flight_path(index))] for index in range(30)], WIDTH)
+        self.assertGreater(len(balls(frames)), 20)
+
     def test_interpolates_frames_where_the_ball_is_not_seen(self):
         frames = make_frames(24)
         missing = {9, 10, 11, 12}

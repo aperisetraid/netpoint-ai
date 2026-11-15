@@ -7,7 +7,9 @@
 """
 
 import argparse
+import copy
 import json
+import pickle
 import statistics
 import sys
 import time
@@ -118,10 +120,25 @@ def verdict(metrics: dict) -> list[str]:
     return problems
 
 
-def run(video: Path, output: Path) -> dict:
+def run(video: Path, output: Path, dump_candidates: Path | None = None) -> dict:
     profiling.enable()
     profiling.reset()
-    from tracker import TennisTracker  # imported late: ultralytics is slow to load
+    import tracker as tracker_module  # imported late: ultralytics is slow to load
+    from tracker import TennisTracker
+
+    if dump_candidates is not None:
+        # Keep what the ball tracker receives so it can be re-run offline in seconds.
+        original_track_ball = tracker_module.track_ball
+
+        def track_and_dump(frames, candidates, image_width):
+            with dump_candidates.open("wb") as handle:
+                pickle.dump(
+                    {"frames": copy.deepcopy(frames), "candidates": candidates, "image_width": image_width},
+                    handle,
+                )
+            return original_track_ball(frames, candidates, image_width)
+
+        tracker_module.track_ball = track_and_dump
 
     tracker = TennisTracker(model_size="yolov8n.pt")
     start = time.perf_counter()
@@ -144,13 +161,14 @@ def main(argv=None) -> int:
     run_parser = commands.add_parser("run")
     run_parser.add_argument("video", type=Path)
     run_parser.add_argument("output", type=Path)
+    run_parser.add_argument("--dump-candidates", type=Path, help="pickle with the ball candidates per frame")
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("gold", type=Path)
     compare_parser.add_argument("new", type=Path)
     arguments = parser.parse_args(argv)
 
     if arguments.command == "run":
-        summary = run(arguments.video, arguments.output)
+        summary = run(arguments.video, arguments.output, arguments.dump_candidates)
         arguments.output.with_suffix(".timing.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return 0
 

@@ -1,4 +1,7 @@
 import bisect
+import functools
+import itertools
+from collections import deque
 import importlib.util
 import math
 import os
@@ -66,6 +69,30 @@ COURT_BALL_STRIDE = 1
 MAX_PLAYER_INTERPOLATION_GAP_FRAMES = 6
 COURT_BALL_MIN_CONFIDENCE = 0.1
 MAX_BALL_CANDIDATES_PER_SOURCE = 6
+# A panning broadcast camera makes every static white shape (logos, lines) light up in the frame
+# difference, and the colour/motion detectors then take them for a moving ball. The previous frame
+# is re-aligned on the current one before differencing when the camera moved enough to matter.
+CAMERA_MOTION_ANALYSIS_WIDTH = 640
+CAMERA_SHIFT_MIN_PIXELS = 1.0
+CAMERA_SHIFT_MIN_RESPONSE = 0.3
+# The ball is transient: a fraction of a second earlier the same scene point (after following the
+# camera) looked different. A logo or a line still looks the same, and so does a broadcast overlay
+# such as the scoreboard at the same screen position, so such candidates are dropped.
+STATIC_SCENE_LAG_FRAMES = 6
+STATIC_SCENE_PATCH_RADIUS = 7
+STATIC_SCENE_SEARCH_PIXELS = 3
+STATIC_SCENE_MIN_CORRELATION = 0.85
+STATIC_SCENE_MIN_TEXTURE = 8.0
+# Line judges and ball kids move like a ball to the motion detector; their boxes are excluded.
+OTHER_PERSON_BOX_MARGIN = 4.0
+# Broadcast graphics stay put on screen while the camera pans. In frames where the camera moved,
+# a pixel votes "overlay" when the previous frame matches it as it was on screen but not once
+# aligned with the camera; scenery does the opposite and a line sliding along itself does neither.
+OVERLAY_CAMERA_MIN_PIXELS = 2.0
+OVERLAY_VOTE_MARGIN = 20.0
+OVERLAY_MIN_MOVING_FRAMES = 5
+OVERLAY_MIN_VOTE_RATIO = 0.4
+OVERLAY_DILATION_PIXELS = 6
 
 
 def ball_candidate_near_player(
@@ -146,6 +173,92 @@ def point_in_ball_tracking_region(
     )
 
 
+@functools.lru_cache(maxsize=8)
+def _ball_region_mask(shape: tuple[int, int], corners: tuple[tuple[int, int], ...]) -> np.ndarray:
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.fillConvexPoly(mask, np.asarray(corners, dtype=np.int32), 255)
+    points = np.asarray(corners, dtype=np.float32)
+    baselines = ((points[0], points[1]), (points[3], points[2]))
+    midpoints = [(start + end) / 2 for start, end in baselines]
+    extension = max(12.0, float(np.linalg.norm(midpoints[0] - midpoints[1])) * 0.35)
+    for start, end in baselines:
+        direction = (end - start) / max(float(np.linalg.norm(end - start)), 1e-6)
+        normal = np.asarray((-direction[1], direction[0]), dtype=np.float32) * extension
+        band = np.asarray((start - normal, end - normal, end + normal, start + normal), dtype=np.int32)
+        cv2.fillConvexPoly(mask, band, 255)
+    mask.setflags(write=False)
+    return mask
+
+
+def ball_region_mask(shape: tuple[int, int], court_corners: list[tuple[int, int]]) -> np.ndarray:
+    """Pixels where the ball is searched: the court plus a band around each baseline.
+
+    It matches `point_in_ball_tracking_region`. A ball in the air near the far baseline or behind
+    either baseline is drawn outside the court quadrilateral, so the court alone hid it.
+    """
+    return _ball_region_mask(tuple(shape[:2]), tuple(tuple(int(v) for v in corner) for corner in court_corners))
+
+
+class ScreenOverlayMask:
+    """Pixels covered by graphics drawn on top of the picture (scoreboard, clock, channel logo)."""
+
+    def __init__(self):
+        self.votes: np.ndarray | None = None
+        self.moving_frames = 0
+        self._mask: np.ndarray | None = None
+        self._scale = 1.0
+
+    def update(
+        self,
+        previous_image: np.ndarray | None,
+        current_image: np.ndarray,
+        shift: tuple[float, float] | None,
+        frame_width: int,
+    ) -> None:
+        """Images are the small grayscale copies from `camera_motion_image`; `shift` in full pixels."""
+        if previous_image is None or shift is None:
+            return
+        if max(abs(shift[0]), abs(shift[1])) < OVERLAY_CAMERA_MIN_PIXELS:
+            return
+        self._scale = frame_width / current_image.shape[1]
+        small_shift = (shift[0] / self._scale, shift[1] / self._scale)
+        aligned = align_to_current(previous_image, small_shift)
+        on_screen = cv2.absdiff(current_image, previous_image)
+        with_camera = cv2.absdiff(current_image, aligned)
+        if self.votes is None:
+            self.votes = np.zeros(current_image.shape[:2], dtype=np.uint16)
+        self.votes += (with_camera - on_screen > OVERLAY_VOTE_MARGIN).astype(np.uint16)
+        self.moving_frames += 1
+        self._mask = None
+
+    def mask(self) -> np.ndarray | None:
+        if self.votes is None or self.moving_frames < OVERLAY_MIN_MOVING_FRAMES:
+            return None
+        if self._mask is None:
+            overlay = (self.votes >= OVERLAY_MIN_VOTE_RATIO * self.moving_frames).astype(np.uint8)
+            size = 2 * max(1, round(OVERLAY_DILATION_PIXELS / self._scale)) + 1
+            self._mask = cv2.dilate(overlay, np.ones((size, size), dtype=np.uint8))
+        return self._mask
+
+    def contains(self, point: tuple[float, float]) -> bool:
+        mask = self.mask()
+        if mask is None:
+            return False
+        x, y = int(point[0] / self._scale), int(point[1] / self._scale)
+        return 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and bool(mask[y, x])
+
+
+def boxes_overlap(first: list[float], second: list[float]) -> bool:
+    return first[0] < second[2] and second[0] < first[2] and first[1] < second[3] and second[1] < first[3]
+
+
+def inside_any_box(point: tuple[float, float], boxes: list[list[float]], margin: float = 0.0) -> bool:
+    return any(
+        box[0] - margin <= point[0] <= box[2] + margin and box[1] - margin <= point[1] <= box[3] + margin
+        for box in boxes
+    )
+
+
 def point_outside_court_near_baseline(
     point: tuple[float, float],
     court_corners: list[tuple[int, int]],
@@ -192,6 +305,85 @@ def player_within_tracking_region(
             or x_meters >= COURT_LENGTH_METERS - PLAYER_SIDELINE_BASELINE_ZONE_METERS
         )
     )
+
+
+def camera_motion_image(frame: np.ndarray) -> np.ndarray:
+    """Small grayscale copy used to estimate the camera motion between frames."""
+    height, width = frame.shape[:2]
+    size = (CAMERA_MOTION_ANALYSIS_WIDTH, max(1, round(height * CAMERA_MOTION_ANALYSIS_WIDTH / width)))
+    return cv2.cvtColor(cv2.resize(frame, size, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+
+def measure_camera_shift(
+    previous_image: np.ndarray,
+    current_image: np.ndarray,
+    frame_width: int,
+) -> tuple[float, float, float]:
+    """(dx, dy, response): full-resolution shift that moves the previous frame onto the current one."""
+    (dx, dy), response = cv2.phaseCorrelate(previous_image, current_image)
+    scale = frame_width / previous_image.shape[1]
+    return dx * scale, dy * scale, response
+
+
+def estimate_camera_shift(
+    previous_image: np.ndarray,
+    current_image: np.ndarray,
+    frame_width: int,
+) -> tuple[float, float] | None:
+    """Shift worth compensating, or None when the camera barely moved or the estimate is unreliable."""
+    dx, dy, response = measure_camera_shift(previous_image, current_image, frame_width)
+    if response < CAMERA_SHIFT_MIN_RESPONSE or max(abs(dx), abs(dy)) < CAMERA_SHIFT_MIN_PIXELS:
+        return None
+    return dx, dy
+
+
+class StaticSceneFilter:
+    """Recognises candidates that are part of the scenery by looking a few frames back."""
+
+    def __init__(self, lag: int = STATIC_SCENE_LAG_FRAMES):
+        self.lag = lag
+        self.history: deque[tuple[np.ndarray, tuple[float, float]]] = deque(maxlen=lag + 1)
+        self.offset = (0.0, 0.0)
+
+    def push(self, gray: np.ndarray, shift: tuple[float, float] | None) -> None:
+        """Adds the current frame; `shift` is the camera motion since the previous one."""
+        if shift is not None:
+            self.offset = (self.offset[0] + shift[0], self.offset[1] + shift[1])
+        self.history.append((gray, self.offset))
+
+    def is_static(self, bbox: list[float]) -> bool:
+        if len(self.history) <= self.lag:
+            return False
+        current, (current_x, current_y) = self.history[-1]
+        past, (past_x, past_y) = self.history[0]
+        height, width = current.shape[:2]
+        radius = max(STATIC_SCENE_PATCH_RADIUS, int(max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / 2) + 2)
+        x, y = round((bbox[0] + bbox[2]) / 2), round((bbox[1] + bbox[3]) / 2)
+        if not (radius <= x < width - radius and radius <= y < height - radius):
+            return False
+        patch = current[y - radius:y + radius + 1, x - radius:x + radius + 1]
+        if float(patch.std()) < STATIC_SCENE_MIN_TEXTURE:
+            return False
+        reach = radius + STATIC_SCENE_SEARCH_PIXELS
+        # Where that scene point was `lag` frames ago given the camera motion (scenery), and the
+        # same screen position (overlays drawn on top of the picture).
+        for past_center_x, past_center_y in {
+            (round(x - (current_x - past_x)), round(y - (current_y - past_y))),
+            (x, y),
+        }:
+            left, top = past_center_x - reach, past_center_y - reach
+            if left < 0 or top < 0 or past_center_x + reach >= width or past_center_y + reach >= height:
+                continue
+            window = past[top:past_center_y + reach + 1, left:past_center_x + reach + 1]
+            if float(cv2.matchTemplate(window, patch, cv2.TM_CCOEFF_NORMED).max()) >= STATIC_SCENE_MIN_CORRELATION:
+                return True
+        return False
+
+
+def align_to_current(previous_frame: np.ndarray, shift: tuple[float, float]) -> np.ndarray:
+    matrix = np.float32([[1, 0, shift[0]], [0, 1, shift[1]]])
+    height, width = previous_frame.shape[:2]
+    return cv2.warpAffine(previous_frame, matrix, (width, height), borderMode=cv2.BORDER_REPLICATE)
 
 
 class FrameFeatures:
@@ -306,8 +498,7 @@ def find_ball_color_candidates(
         motion_mask = cv2.threshold(difference, 15, 255, cv2.THRESH_BINARY)[1]
     contour_sources = [] if moving_only else [(contour, 0.0) for contour in contours]
     if motion_mask is not None:
-        court_fill = np.zeros(mask.shape, dtype=np.uint8)
-        cv2.fillConvexPoly(court_fill, court_polygon.astype(np.int32), 255)
+        court_fill = ball_region_mask(mask.shape, court_corners)
         previous_features = previous_features or FrameFeatures(previous_frame)
         previous_hsv = previous_features.hsv
         if moving_only:
@@ -630,7 +821,11 @@ class TennisTracker:
         last_player_frame_by_side = {}
         previous_video_frame = None
         previous_features = None
+        previous_motion_image = None
+        static_scene = StaticSceneFilter()
+        screen_overlay = ScreenOverlayMask()
         last_player_bboxes: list[list[float]] = []
+        last_other_person_bboxes: list[list[float]] = []
         skipped_player_frames: list[int] = []
         ball_candidates_by_frame = []
         if progress_callback is not None:
@@ -644,6 +839,25 @@ class TennisTracker:
                 break
             image_height, image_width = frame.shape[:2]
             features = FrameFeatures(frame)
+            with stage("camera_motion"):
+                motion_image = camera_motion_image(frame)
+                measured_shift = (
+                    measure_camera_shift(previous_motion_image, motion_image, image_width)
+                    if previous_motion_image is not None
+                    else None
+                )
+                reliable_shift = (
+                    measured_shift[:2]
+                    if measured_shift is not None and measured_shift[2] >= CAMERA_SHIFT_MIN_RESPONSE
+                    else None
+                )
+                camera_shift = (
+                    reliable_shift
+                    if reliable_shift is not None and max(map(abs, reliable_shift)) >= CAMERA_SHIFT_MIN_PIXELS
+                    else None
+                )
+                static_scene.push(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), reliable_shift)
+                screen_overlay.update(previous_motion_image, motion_image, reliable_shift, image_width)
 
             should_detect_court = (
                 frame_count % CALIBRATION_RETRY_INTERVAL == 0
@@ -744,6 +958,7 @@ class TennisTracker:
             detections = []
             player_candidates_by_side = {}
             player_bboxes = [] if run_player_detection else last_player_bboxes
+            person_bboxes: list[list[float]] = []
             ball_candidates = []
             for box in boxes:
                 class_id = int(box.cls[0].item())
@@ -751,6 +966,8 @@ class TennisTracker:
                 if class_id == 0 and confidence < PLAYER_MIN_CONFIDENCE:
                     continue
                 bbox = [float(coordinate) for coordinate in box.xyxy[0].tolist()]
+                if class_id == 0:
+                    person_bboxes.append(bbox)
                 x1, _, x2, y2 = bbox
                 x_meters = None
                 y_meters = None
@@ -838,27 +1055,59 @@ class TennisTracker:
                     )
                 )
             ]
+            if run_player_detection:
+                # Anyone overlapping a person in the playing area (a player, or a second box YOLO
+                # put on the same player) is kept out of this list: the ball is often next to them.
+                other_person_bboxes = [
+                    box for box in person_bboxes
+                    if not any(boxes_overlap(box, player_box) for player_box in player_bboxes)
+                ]
+                last_other_person_bboxes = other_person_bboxes
+            else:
+                other_person_bboxes = last_other_person_bboxes
             if homography_matrix is not None:
                 cheap_candidates = []
                 if previous_video_frame is not None:
+                    reference_frame, reference_features = previous_video_frame, previous_features
+                    if camera_shift is not None:
+                        with stage("camera_motion"):
+                            reference_frame = align_to_current(previous_video_frame, camera_shift)
+                        reference_features = FrameFeatures(reference_frame)
                     for source, moving_only in (("color", False), ("motion", True)):
                         with stage(f"ball_{source}"):
-                            cheap_candidates.extend(
-                                {
-                                    "bbox": bbox,
-                                    "confidence": max(0.0, min(1.0, score / 2)),
-                                    "source": source,
-                                }
-                                for score, bbox in find_ball_color_candidates(
-                                    frame,
-                                    calibrated_corners,
-                                    previous_video_frame,
-                                    player_bboxes,
-                                    moving_only=moving_only,
-                                    features=features,
-                                    previous_features=previous_features,
-                                )[:MAX_BALL_CANDIDATES_PER_SOURCE]
+                            found = find_ball_color_candidates(
+                                frame,
+                                calibrated_corners,
+                                reference_frame,
+                                player_bboxes,
+                                moving_only=moving_only,
+                                features=features,
+                                previous_features=reference_features,
                             )
+                        # Scenery is discarded before keeping the best few: logos, lines and the
+                        # scoreboard often outscore the ball and would otherwise take every slot.
+                        with stage("static_scene"):
+                            kept = list(itertools.islice(
+                                (
+                                    (score, bbox) for score, bbox in found
+                                    if not inside_any_box(
+                                        ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+                                        other_person_bboxes,
+                                        OTHER_PERSON_BOX_MARGIN,
+                                    )
+                                    and not screen_overlay.contains(((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2))
+                                    and not static_scene.is_static(bbox)
+                                ),
+                                MAX_BALL_CANDIDATES_PER_SOURCE,
+                            ))
+                        cheap_candidates.extend(
+                            {
+                                "bbox": bbox,
+                                "confidence": max(0.0, min(1.0, score / 2)),
+                                "source": source,
+                            }
+                            for score, bbox in kept
+                        )
                 # The court-crop detector is the most expensive step: it runs on alternate frames,
                 # and in any frame where the cheap detectors found nothing at all.
                 if not frame_ball_candidates and (
@@ -914,6 +1163,7 @@ class TennisTracker:
             frame_count += 1
             previous_video_frame = frame
             previous_features = features
+            previous_motion_image = motion_image
             if progress_callback is not None and (
                 frame_count % 5 == 0
                 or (total_frames is not None and frame_count >= total_frames)

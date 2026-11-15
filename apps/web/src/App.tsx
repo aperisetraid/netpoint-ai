@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { CoachPanel } from './components/coach/CoachPanel'
 import { IngestPanel } from './components/ingest/IngestPanel'
 import { PlayerNamesDialog, type PlayerNames } from './components/ingest/PlayerNamesDialog'
 import { LandingView } from './components/landing/LandingView'
@@ -7,7 +8,7 @@ import { LibraryView } from './components/library/LibraryView'
 import { AnalysisSidebar } from './components/layout/AnalysisSidebar'
 import { type Theme, WorkspaceHeader } from './components/layout/WorkspaceHeader'
 import { ProcessingOverlay } from './components/loader/ProcessingOverlay'
-import { VideoPlayer } from './components/video/VideoPlayer'
+import { VideoPlayer, type VideoPlayerHandle } from './components/video/VideoPlayer'
 import { type AnalysisRequest, useMatchAnalysis } from './hooks/useMatchAnalysis'
 import { findFrameAt } from './lib/frameLookup.ts'
 import { getMatchVideoUrl } from './services/api'
@@ -24,6 +25,8 @@ function App() {
   // Playback position at the rate of the video's own events; the canvas overlay keeps its own clock.
   const [currentTime, setCurrentTime] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
+  const [coachOpen, setCoachOpen] = useState(false)
+  const playerRef = useRef<VideoPlayerHandle>(null)
   const { analysis, errorMessage, isSubmitting, progress, start, openSaved } = useMatchAnalysis()
   // Source menu: open by default while there is nothing to show, collapsed once a match is loaded.
   const [sourceOpen, setSourceOpen] = useState<boolean | null>(null)
@@ -53,6 +56,14 @@ function App() {
       : []),
     [telemetry, currentFrame, currentTime],
   )
+
+  // Timestamp links from the coach move the video; on stacked layouts the player is brought into view.
+  const seekVideo = useCallback((seconds: number) => {
+    playerRef.current?.seekTo(seconds)
+    if (window.matchMedia('(max-width: 1100px)').matches) {
+      document.querySelector('.stage')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [])
 
   function handlePlayerNames(names: PlayerNames) {
     setPlayerNames(names)
@@ -104,8 +115,11 @@ function App() {
             frameCount={telemetry ? telemetry.frames.length : null}
             theme={theme}
             sourceOpen={showSource}
+            coachOpen={coachOpen}
+            coachEnabled={analysis !== null && !isSubmitting}
             onThemeChange={setTheme}
             onToggleSource={() => setSourceOpen(!showSource)}
+            onToggleCoach={() => setCoachOpen(!coachOpen)}
             onHome={() => setView('landing')}
             onLibrary={() => setView('library')}
           />
@@ -130,6 +144,7 @@ function App() {
           <div className="workspace-main" inert={isSubmitting}>
             <section className="stage" aria-label="Reproducción del partido">
               <VideoPlayer
+                ref={playerRef}
                 key={analysis?.matchId ?? 'empty'}
                 sourceUrl={analysis ? getMatchVideoUrl(analysis.matchId) : ''}
                 telemetry={telemetry}
@@ -139,15 +154,30 @@ function App() {
               />
             </section>
 
-            <AnalysisSidebar
-              analysis={analysis}
-              telemetry={telemetry}
-              frame={currentFrame}
-              bounces={visibleBounces}
-              currentTime={currentTime}
-              isPlaying={isVideoPlaying}
-              playerNames={playerNames}
-            />
+            {/* Both panels stay mounted: closing the coach mid-answer does not cut the answer off. */}
+            <div id="side-panel" className="side-stack" data-view={coachOpen && analysis ? 'coach' : 'analysis'}>
+              <div className="side-stack__pane" inert={coachOpen && analysis !== null}>
+                <AnalysisSidebar
+                  analysis={analysis}
+                  telemetry={telemetry}
+                  frame={currentFrame}
+                  bounces={visibleBounces}
+                  currentTime={currentTime}
+                  isPlaying={isVideoPlaying}
+                  playerNames={playerNames}
+                />
+              </div>
+              <div className="side-stack__pane side-stack__pane--coach" inert={!coachOpen || analysis === null}>
+                <CoachPanel
+                  matchId={isSubmitting ? null : analysis?.matchId ?? null}
+                  playerNames={playerNames}
+                  currentTime={currentTime}
+                  hasVideo={analysis !== null}
+                  onSeek={seekVideo}
+                  onClose={() => setCoachOpen(false)}
+                />
+              </div>
+            </div>
           </div>
           <ProcessingOverlay active={isSubmitting} progress={progress} />
         </div>
