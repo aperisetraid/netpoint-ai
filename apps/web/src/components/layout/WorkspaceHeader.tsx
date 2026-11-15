@@ -1,4 +1,4 @@
-import { ChevronDown, Home, Plus } from 'lucide-react'
+import { ChevronDown, Home, Library, Plus } from 'lucide-react'
 
 import { type Theme, ThemeToggle } from './ThemeToggle'
 
@@ -13,12 +13,13 @@ interface WorkspaceHeaderProps {
   onThemeChange: (theme: Theme) => void
   onToggleSource: () => void
   onHome: () => void
+  onLibrary: () => void
 }
 
 const statusLabels = { idle: 'En espera', processing: 'Procesando', completed: 'Procesado' } as const
 
 export function WorkspaceHeader({
-  title, status, frameCount, theme, sourceOpen, onThemeChange, onToggleSource, onHome,
+  title, status, frameCount, theme, sourceOpen, onThemeChange, onToggleSource, onHome, onLibrary,
 }: WorkspaceHeaderProps) {
   return (
     <header className="workspace-header">
@@ -36,6 +37,10 @@ export function WorkspaceHeader({
         </span>
       </div>
 
+      <button type="button" className="library-link" onClick={onLibrary} title="Partidos analizados">
+        <Library size={15} aria-hidden="true" />
+        <span>Biblioteca</span>
+      </button>
       <button
         type="button"
         className="source-trigger"

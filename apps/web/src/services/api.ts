@@ -78,6 +78,10 @@ export function getMatchFrameUrl(matchId: string, frameIndex: number): string {
   return `${visionBaseUrl}/matches/${encodeURIComponent(matchId)}/frames/${frameIndex}`
 }
 
+export function getLibraryThumbnailUrl(matchId: string): string {
+  return `${visionBaseUrl}/library/matches/${encodeURIComponent(matchId)}/thumbnail`
+}
+
 export function getMatchVideoUrl(matchId: string): string {
   return `${visionBaseUrl}/matches/${encodeURIComponent(matchId)}/video`
 }
@@ -176,4 +180,35 @@ export async function getMatchProgress(matchId: string): Promise<MatchProgressRe
   return requestJson<MatchProgressResponse>(`/api/v1/matches/${encodeURIComponent(matchId)}/progress`, {
     method: 'GET',
   })
+}
+
+/** Summary of an analysis already stored by the backend. */
+export interface LibraryMatch {
+  id: string
+  title: string
+  createdAt: string
+  source: 'url' | 'upload' | null
+  videoFilename: string | null
+  hasVideo: boolean
+  fps: number | null
+  width: number | null
+  height: number | null
+  frameCount: number
+  durationSeconds: number | null
+  calibrated: boolean
+  hitCount: number
+  bounceCount: number
+  maxSpeedKmh: number | null
+}
+
+export interface LibraryMatchResponse extends MatchTelemetryResponse {
+  title: string
+}
+
+export async function listLibraryMatches(): Promise<LibraryMatch[]> {
+  return requestJson<LibraryMatch[]>('/api/v1/matches', { method: 'GET' })
+}
+
+export async function getLibraryMatch(matchId: string): Promise<LibraryMatchResponse> {
+  return requestJson<LibraryMatchResponse>(`/api/v1/matches/${encodeURIComponent(matchId)}`, { method: 'GET' })
 }

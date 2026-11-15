@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { IngestPanel } from './components/ingest/IngestPanel'
 import { PlayerNamesDialog, type PlayerNames } from './components/ingest/PlayerNamesDialog'
 import { LandingView } from './components/landing/LandingView'
+import { LibraryView } from './components/library/LibraryView'
 import { AnalysisSidebar } from './components/layout/AnalysisSidebar'
 import { type Theme, WorkspaceHeader } from './components/layout/WorkspaceHeader'
 import { ProcessingOverlay } from './components/loader/ProcessingOverlay'
@@ -17,13 +18,13 @@ function App() {
   const [theme, setTheme] = useState<Theme>(() =>
     window.localStorage.getItem('netpoint-theme') === 'light' ? 'light' : 'dark',
   )
-  const [view, setView] = useState<'landing' | 'analysis'>('landing')
+  const [view, setView] = useState<'landing' | 'library' | 'analysis'>('landing')
   const [playerNames, setPlayerNames] = useState<PlayerNames>({ far: '', near: '' })
   const [pendingRequest, setPendingRequest] = useState<AnalysisRequest | null>(null)
   // Playback position at the rate of the video's own events; the canvas overlay keeps its own clock.
   const [currentTime, setCurrentTime] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
-  const { analysis, errorMessage, isSubmitting, progress, start } = useMatchAnalysis()
+  const { analysis, errorMessage, isSubmitting, progress, start, openSaved } = useMatchAnalysis()
   // Source menu: open by default while there is nothing to show, collapsed once a match is loaded.
   const [sourceOpen, setSourceOpen] = useState<boolean | null>(null)
   const showSource = !isSubmitting && (sourceOpen ?? (analysis === null || errorMessage !== null))
@@ -62,6 +63,15 @@ function App() {
     setView('analysis')
   }
 
+  async function handleOpenSaved(matchId: string) {
+    await openSaved(matchId)
+    setPlayerNames({ far: '', near: '' })
+    setCurrentTime(0)
+    setIsVideoPlaying(false)
+    setSourceOpen(false)
+    setView('analysis')
+  }
+
   return (
     <main className="app-shell" data-theme={theme}>
       <PlayerNamesDialog
@@ -75,6 +85,15 @@ function App() {
           onThemeChange={setTheme}
           onStart={() => setView('analysis')}
           onSelectVideo={setPendingRequest}
+          onLibrary={() => setView('library')}
+        />
+      ) : view === 'library' ? (
+        <LibraryView
+          theme={theme}
+          onThemeChange={setTheme}
+          onHome={() => setView('landing')}
+          onWorkspace={() => setView('analysis')}
+          onOpen={handleOpenSaved}
         />
       ) : (
       <div className="workspace">
@@ -88,6 +107,7 @@ function App() {
             onThemeChange={setTheme}
             onToggleSource={() => setSourceOpen(!showSource)}
             onHome={() => setView('landing')}
+            onLibrary={() => setView('library')}
           />
 
           {/* Floating source menu: it overlays the workspace instead of taking vertical space. */}

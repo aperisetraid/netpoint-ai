@@ -89,3 +89,26 @@ export interface MatchRegistry {
   save(match: MatchRecord): void;
   getById(matchId: string): MatchRecord | undefined;
 }
+
+/** Summary of an analysis already stored by the vision service. */
+export interface LibraryMatchSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  source: 'url' | 'upload' | null;
+  videoFilename: string | null;
+  hasVideo: boolean;
+  fps: number | null;
+  width: number | null;
+  height: number | null;
+  frameCount: number;
+  durationSeconds: number | null;
+  calibrated: boolean;
+  hitCount: number;
+  bounceCount: number;
+  maxSpeedKmh: number | null;
+}
+
+export interface LibraryMatchResponse extends MatchTelemetryResponse {
+  title: string;
+}

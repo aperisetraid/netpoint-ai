@@ -29,7 +29,7 @@ export class VisionServiceError extends Error {
   }
 }
 
-function isVisionServiceResponse(value: unknown): value is VisionServiceResponse {
+export function isVisionServiceResponse(value: unknown): value is VisionServiceResponse {
   if (typeof value !== 'object' || value === null || !('telemetry' in value)) {
     return false;
   }
@@ -94,7 +94,7 @@ export class ProcessMatchUseCase {
       response = await this.fetchImpl(VISION_SERVICE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ youtubeUrl: request.sourceUrl, matchId }),
+        body: JSON.stringify({ youtubeUrl: request.sourceUrl, matchId, title: request.title }),
       });
     } catch {
       throw new VisionServiceError('Could not connect to the Python vision service.');
@@ -131,6 +131,7 @@ export class ProcessMatchUseCase {
           'Content-Type': 'application/octet-stream',
           'X-Match-Id': matchId,
           'X-Video-Filename': encodeURIComponent(request.fileName),
+          ...(request.title ? { 'X-Title': encodeURIComponent(request.title) } : {}),
         },
         body: request.file as unknown as RequestInit['body'],
         duplex: 'half',

@@ -8,6 +8,16 @@ export async function registerRoutes(
 ): Promise<void> {
   const matchController = new MatchController(dependencies);
 
+  app.get('/api/v1/matches', {
+    schema: matchController.libraryListSchema,
+    handler: matchController.listLibrary.bind(matchController),
+  });
+
+  app.get('/api/v1/matches/:matchId', {
+    schema: matchController.libraryMatchSchema,
+    handler: matchController.getLibraryMatch.bind(matchController),
+  });
+
   app.post('/api/v1/matches/process', {
     schema: matchController.processMatchSchema,
     handler: matchController.processMatch.bind(matchController),

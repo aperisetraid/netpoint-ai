@@ -12,9 +12,11 @@ interface LandingViewProps {
   onStart: () => void
   /** Starts an analysis from a dropped file or a demo clip. */
   onSelectVideo: (request: AnalysisRequest) => void
+  /** Opens the library of already analysed matches. */
+  onLibrary: () => void
 }
 
-export function LandingView({ theme, onThemeChange, onStart, onSelectVideo }: LandingViewProps) {
+export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLibrary }: LandingViewProps) {
   return (
     <div className="landing">
       <header className="landing-nav">
@@ -24,6 +26,7 @@ export function LandingView({ theme, onThemeChange, onStart, onSelectVideo }: La
         <nav className="landing-nav__links" aria-label="Secciones">
           <a href="#landing-features">Características</a>
           <a href="#landing-quick-start">Demo</a>
+          <button type="button" onClick={onLibrary}>Biblioteca</button>
         </nav>
         <ThemeToggle theme={theme} onThemeChange={onThemeChange} />
       </header>

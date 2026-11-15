@@ -1,4 +1,5 @@
 import asyncio
+from typing import Annotated
 from pathlib import Path
 from urllib.parse import unquote
 from uuid import uuid4
@@ -8,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Path as PathParameter, Reque
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
+import library
 from main import process_video_file, run_pipeline
 
 
@@ -15,6 +17,7 @@ class ProcessVideoRequest(BaseModel):
     youtubeUrl: str
     matchId: str
     maxFrames: int | None = Field(default=None, ge=1)
+    title: str | None = None
 
 
 app = FastAPI()
@@ -88,6 +91,7 @@ async def process_video(request: ProcessVideoRequest):
     video_path = next(output_dir.glob("*.mp4"), None)
     if video_path is not None:
         processed_videos[request.matchId] = (video_path, telemetry["video"]["frame_count"])
+    library.write_match_metadata(output_dir, request.title, "url")
     return {
         "matchId": request.matchId,
         "telemetry": telemetry,
@@ -99,6 +103,7 @@ async def process_video_upload(
     request: Request,
     match_id: str = Header(alias="X-Match-Id"),
     filename: str = Header(alias="X-Video-Filename"),
+    title: Annotated[str | None, Header(alias="X-Title")] = None,
 ):
     safe_filename = Path(unquote(filename)).name
     if Path(safe_filename).suffix.lower() not in allowed_video_extensions:
@@ -135,9 +140,49 @@ async def process_video_upload(
         raise
 
     processed_videos[match_id] = (video_path, telemetry["video"]["frame_count"])
+    library.write_match_metadata(output_dir, unquote(title) if title else None, "upload")
     return {"matchId": match_id, "telemetry": telemetry}
 
 
 @app.get("/matches/{match_id}/progress")
 async def get_video_progress(match_id: str):
     return get_match_progress(match_id)
+
+
+def get_library_folder(match_id: str) -> Path:
+    folder = library.resolve_match_dir(match_video_root, match_id)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Partido no encontrado en la biblioteca.")
+    return folder
+
+
+@app.get("/library/matches")
+async def list_library_matches():
+    return await asyncio.to_thread(library.list_matches, match_video_root)
+
+
+@app.get("/library/matches/{match_id}")
+async def open_library_match(match_id: str):
+    """Returns a stored analysis and re-registers its video so it can be played and inspected."""
+    folder = get_library_folder(match_id)
+    try:
+        summary, telemetry = await asyncio.to_thread(
+            lambda: (library.summarize_match(folder), library.read_telemetry(folder))
+        )
+    except (OSError, ValueError):
+        raise HTTPException(status_code=500, detail="La telemetria guardada no se puede leer.")
+    if summary is None:
+        raise HTTPException(status_code=500, detail="La telemetria guardada no se puede leer.")
+    video_path = library.find_video(folder)
+    if video_path is not None:
+        processed_videos[folder.name] = (video_path, telemetry["video"]["frame_count"])
+    return {"matchId": folder.name, "title": summary["title"], "telemetry": telemetry}
+
+
+@app.get("/library/matches/{match_id}/thumbnail")
+async def get_library_thumbnail(match_id: str):
+    folder = get_library_folder(match_id)
+    thumbnail = await asyncio.to_thread(library.ensure_thumbnail, folder)
+    if thumbnail is None:
+        raise HTTPException(status_code=404, detail="Miniatura no disponible.")
+    return FileResponse(thumbnail, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

@@ -46,7 +46,22 @@ html { scroll-behavior: smooth; }
   transition: color 160ms ease;
 }
 
-.landing-nav__links a:hover { color: var(--landing-heading); }
+.landing-nav__links a:hover,
+.landing-nav__links button:hover { color: var(--landing-heading); }
+
+.landing-nav__links button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--landing-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.landing-nav__links button:focus-visible { outline: 2px solid var(--landing-accent-strong); outline-offset: 4px; }
 
 /* Hero */
 .landing-hero {

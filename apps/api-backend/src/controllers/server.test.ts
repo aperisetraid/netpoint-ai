@@ -38,13 +38,14 @@ const pythonTelemetry = {
   events: { bounces: [], hits: [] },
 };
 
-const pythonRequests: Array<{ url: string; payload: { youtubeUrl: string; matchId: string } }> = [];
+const pythonRequests: Array<{ url: string; payload: { youtubeUrl: string; matchId: string; title?: string } }> = [];
 
 const app = await buildApp({
   fetchImpl: async (input, init) => {
     const payload = JSON.parse(String(init?.body)) as {
       youtubeUrl: string;
       matchId: string;
+      title?: string;
     };
     pythonRequests.push({ url: String(input), payload });
 
@@ -89,11 +90,11 @@ test('POST /api/v1/matches/process forwards the video and returns Python telemet
   assert.deepEqual(pythonRequests.slice(0, 2), [
     {
       url: 'http://localhost:8000/process-video',
-      payload: { youtubeUrl: payload.sourceUrl, matchId: firstBody.matchId },
+      payload: { youtubeUrl: payload.sourceUrl, matchId: firstBody.matchId, title: payload.title },
     },
     {
       url: 'http://localhost:8000/process-video',
-      payload: { youtubeUrl: payload.sourceUrl, matchId: secondBody.matchId },
+      payload: { youtubeUrl: payload.sourceUrl, matchId: secondBody.matchId, title: payload.title },
     },
   ]);
 });
@@ -200,6 +201,97 @@ test('invalid payloads and IDs return 400 while unknown IDs return 404', async (
   assert.equal(invalidUrlResponse.statusCode, 400);
   assert.equal(invalidMatchIdResponse.statusCode, 400);
   assert.equal(unknownMatchIdResponse.statusCode, 404);
+});
+
+const libraryMatchId = '123e4567-e89b-42d3-a456-426614174020';
+const librarySummary = {
+  id: libraryMatchId,
+  title: 'Final ATP - Set 1',
+  createdAt: '2026-11-15T10:00:00+00:00',
+  source: 'upload',
+  videoFilename: 'final.mp4',
+  hasVideo: true,
+  fps: 25,
+  width: 1920,
+  height: 1080,
+  frameCount: 447,
+  durationSeconds: 17.88,
+  calibrated: true,
+  hitCount: 6,
+  bounceCount: 3,
+  maxSpeedKmh: 121.4,
+};
+
+test('GET /api/v1/matches lists the analyses stored by the vision service', async () => {
+  const libraryApp = await buildApp({
+    fetchImpl: async (input) => {
+      assert.equal(String(input), 'http://localhost:8000/library/matches');
+      return new Response(JSON.stringify([librarySummary, { ...librarySummary, id: 'x', extra: true }]));
+    },
+  });
+
+  try {
+    const response = await libraryApp.inject({ method: 'GET', url: '/api/v1/matches' });
+    assert.equal(response.statusCode, 200);
+    const [first, second] = response.json();
+    assert.deepEqual(first, librarySummary);
+    assert.equal('extra' in second, false);
+  } finally {
+    await libraryApp.close();
+  }
+});
+
+test('GET /api/v1/matches/:matchId loads a stored analysis without reprocessing', async () => {
+  const requested: string[] = [];
+  const libraryApp = await buildApp({
+    fetchImpl: async (input) => {
+      requested.push(String(input));
+      return new Response(
+        JSON.stringify({ matchId: libraryMatchId, title: 'Final ATP - Set 1', telemetry: pythonTelemetry }),
+      );
+    },
+  });
+
+  try {
+    const response = await libraryApp.inject({ method: 'GET', url: `/api/v1/matches/${libraryMatchId}` });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      matchId: libraryMatchId,
+      title: 'Final ATP - Set 1',
+      telemetry: pythonTelemetry,
+    });
+    assert.deepEqual(requested, [`http://localhost:8000/library/matches/${libraryMatchId}`]);
+  } finally {
+    await libraryApp.close();
+  }
+});
+
+test('library endpoints map vision errors to 400, 404 and 502', async () => {
+  const status = { current: 404 };
+  const libraryApp = await buildApp({
+    fetchImpl: async () => new Response('{}', { status: status.current }),
+  });
+  const offlineApp = await buildApp({
+    fetchImpl: async () => {
+      throw new TypeError('connect ECONNREFUSED');
+    },
+  });
+
+  try {
+    const invalid = await libraryApp.inject({ method: 'GET', url: '/api/v1/matches/not-a-uuid' });
+    const missing = await libraryApp.inject({ method: 'GET', url: `/api/v1/matches/${libraryMatchId}` });
+    status.current = 500;
+    const failing = await libraryApp.inject({ method: 'GET', url: '/api/v1/matches' });
+    const offline = await offlineApp.inject({ method: 'GET', url: '/api/v1/matches' });
+
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(missing.statusCode, 404);
+    assert.equal(failing.statusCode, 502);
+    assert.equal(offline.statusCode, 502);
+  } finally {
+    await libraryApp.close();
+    await offlineApp.close();
+  }
 });
 
 test('OpenAPI contract has no unresolved $ref', async () => {

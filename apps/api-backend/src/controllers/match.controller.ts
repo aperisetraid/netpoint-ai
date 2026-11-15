@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 
 import type { MatchProcessRequest } from '../domain/match.entity.js';
 import { MatchNotFoundError, GetTelemetryUseCase } from '../use-cases/get-telemetry.usecase.js';
+import { LibraryUseCase } from '../use-cases/library.usecase.js';
 import { ProcessMatchUseCase, VisionServiceError } from '../use-cases/process-match.usecase.js';
 
 const DETECTION_SCHEMA = {
@@ -244,6 +245,65 @@ const MATCH_PROGRESS_SCHEMA = {
   },
 } as const;
 
+const ERROR_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['message'],
+  properties: { message: { type: 'string' } },
+} as const;
+
+const LIBRARY_MATCH_SUMMARY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id', 'title', 'createdAt', 'source', 'videoFilename', 'hasVideo', 'fps', 'width', 'height',
+    'frameCount', 'durationSeconds', 'calibrated', 'hitCount', 'bounceCount', 'maxSpeedKmh',
+  ],
+  properties: {
+    id: { type: 'string' },
+    title: { type: 'string' },
+    createdAt: { type: 'string' },
+    source: { anyOf: [{ type: 'string', enum: ['url', 'upload'] }, { type: 'null' }] },
+    videoFilename: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    hasVideo: { type: 'boolean' },
+    fps: NULLABLE_NUMBER,
+    width: NULLABLE_NUMBER,
+    height: NULLABLE_NUMBER,
+    frameCount: { type: 'integer', minimum: 0 },
+    durationSeconds: NULLABLE_NUMBER,
+    calibrated: { type: 'boolean' },
+    hitCount: { type: 'integer', minimum: 0 },
+    bounceCount: { type: 'integer', minimum: 0 },
+    maxSpeedKmh: NULLABLE_NUMBER,
+  },
+} as const;
+
+const LIBRARY_LIST_SCHEMA = {
+  response: {
+    200: { type: 'array', items: LIBRARY_MATCH_SUMMARY_SCHEMA },
+    502: ERROR_RESPONSE_SCHEMA,
+  },
+} as const;
+
+const LIBRARY_MATCH_SCHEMA = {
+  params: MATCH_TELEMETRY_SCHEMA.params,
+  response: {
+    200: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['matchId', 'title', 'telemetry'],
+      properties: {
+        matchId: { type: 'string' },
+        title: { type: 'string' },
+        telemetry: MATCH_TELEMETRY_OBJECT_SCHEMA,
+      },
+    },
+    400: ERROR_RESPONSE_SCHEMA,
+    404: ERROR_RESPONSE_SCHEMA,
+    502: ERROR_RESPONSE_SCHEMA,
+  },
+} as const;
+
 function isValidHttpUrl(value: string): boolean {
   try {
     const parsedUrl = new URL(value);
@@ -264,6 +324,7 @@ interface MatchTelemetryParams {
 export interface MatchControllerDependencies {
   processMatchUseCase: ProcessMatchUseCase;
   getTelemetryUseCase: GetTelemetryUseCase;
+  libraryUseCase: LibraryUseCase;
 }
 
 export class MatchController {
@@ -274,6 +335,10 @@ export class MatchController {
   readonly matchTelemetrySchema = MATCH_TELEMETRY_SCHEMA;
 
   readonly matchProgressSchema = MATCH_PROGRESS_SCHEMA;
+
+  readonly libraryListSchema = LIBRARY_LIST_SCHEMA;
+
+  readonly libraryMatchSchema = LIBRARY_MATCH_SCHEMA;
 
   constructor(private readonly dependencies: MatchControllerDependencies) {}
 
@@ -395,6 +460,43 @@ export class MatchController {
       const progress = await this.dependencies.processMatchUseCase.getProgress(matchId);
       await reply.status(200).send(progress);
     } catch (error) {
+      if (error instanceof VisionServiceError) {
+        await reply.status(502).send({ message: error.message });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async listLibrary(_request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    try {
+      await reply.status(200).send(await this.dependencies.libraryUseCase.list());
+    } catch (error) {
+      if (error instanceof VisionServiceError) {
+        await reply.status(502).send({ message: error.message });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async getLibraryMatch(
+    request: FastifyRequest<{ Params: MatchTelemetryParams }>,
+    reply: FastifyReply,
+  ): Promise<void> {
+    const { matchId } = request.params;
+    if (!isValidUuid(matchId)) {
+      await reply.status(400).send({ message: 'matchId must be a valid UUID.' });
+      return;
+    }
+
+    try {
+      await reply.status(200).send(await this.dependencies.libraryUseCase.get(matchId));
+    } catch (error) {
+      if (error instanceof MatchNotFoundError) {
+        await reply.status(404).send({ message: error.message });
+        return;
+      }
       if (error instanceof VisionServiceError) {
         await reply.status(502).send({ message: error.message });
         return;

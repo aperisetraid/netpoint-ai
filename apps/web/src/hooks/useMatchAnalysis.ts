@@ -4,6 +4,7 @@ import {
   ApiError,
   type MatchProgressResponse,
   type MatchTelemetry,
+  getLibraryMatch,
   getMatchProgress,
   processMatch,
   uploadMatchVideo,
@@ -81,5 +82,16 @@ export function useMatchAnalysis() {
     }
   }, [])
 
-  return { analysis, errorMessage, isSubmitting, progress, start }
+  /** Loads an analysis stored in the library; throws an ApiError if it cannot be read. */
+  const openSaved = useCallback(async (matchId: string) => {
+    const saved = await getLibraryMatch(matchId)
+    // A newer open or analysis must not be overwritten by a slow response.
+    ++requestSequenceRef.current
+    setErrorMessage(null)
+    setProgress(noProgress)
+    setIsSubmitting(false)
+    setAnalysis({ matchId: saved.matchId, title: saved.title, telemetry: saved.telemetry })
+  }, [])
+
+  return { analysis, errorMessage, isSubmitting, progress, start, openSaved }
 }

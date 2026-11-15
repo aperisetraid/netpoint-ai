@@ -10,6 +10,55 @@ servers:
     description: Servidor Local de Desarrollo
 
 paths:
+  /matches:
+    get:
+      summary: Listar los partidos ya analizados (biblioteca)
+      description: Recorre los resultados guardados por el servicio de visión y devuelve sus metadatos, del más reciente al más antiguo. No reprocesa ningún vídeo.
+      operationId: listMatches
+      responses:
+        '200':
+          description: Listado de partidos analizados.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LibraryMatchSummary'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
+
+  /matches/{matchId}:
+    get:
+      summary: Abrir un partido analizado de la biblioteca
+      description: Devuelve la telemetría guardada de un partido y deja su vídeo disponible para la reproducción, sin volver a procesarlo.
+      operationId: getLibraryMatch
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Partido cargado desde la biblioteca.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/MatchTelemetryResponse'
+                  - type: object
+                    required: [title]
+                    properties:
+                      title:
+                        type: string
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '502':
+          $ref: '#/components/responses/502BadGateway'
+
   /matches/process:
     post:
       summary: Procesar un partido y devolver telemetría
@@ -237,6 +286,51 @@ components:
           minimum: 0
           maximum: 100
           example: 100
+
+    LibraryMatchSummary:
+      type: object
+      required: [id, title, createdAt, source, videoFilename, hasVideo, fps, width, height, frameCount, durationSeconds, calibrated, hitCount, bounceCount, maxSpeedKmh]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          nullable: true
+          enum: [url, upload]
+        videoFilename:
+          type: string
+          nullable: true
+        hasVideo:
+          type: boolean
+        fps:
+          type: number
+          nullable: true
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        frameCount:
+          type: integer
+        durationSeconds:
+          type: number
+          nullable: true
+        calibrated:
+          type: boolean
+        hitCount:
+          type: integer
+        bounceCount:
+          type: integer
+        maxSpeedKmh:
+          type: number
+          nullable: true
 
     MatchProgressResponse:
       type: object

@@ -11,6 +11,7 @@ import type { MatchRegistry } from '../domain/match.entity.js';
 import { InMemoryMatchRegistry } from '../infrastructure/in-memory-match.registry.js';
 import { registerRoutes } from './routes.js';
 import { GetTelemetryUseCase } from '../use-cases/get-telemetry.usecase.js';
+import { LibraryUseCase } from '../use-cases/library.usecase.js';
 import { ProcessMatchUseCase } from '../use-cases/process-match.usecase.js';
 
 export interface BuildAppOptions {
@@ -62,6 +63,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await registerRoutes(app, {
     processMatchUseCase,
     getTelemetryUseCase,
+    libraryUseCase: new LibraryUseCase({ fetchImpl: options.fetchImpl }),
   });
 
   return app;
