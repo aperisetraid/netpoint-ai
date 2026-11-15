@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Link2, RefreshCw, Upload, Video } from 'lucide-react'
 
 import type { AnalysisRequest } from '../../hooks/useMatchAnalysis'
+import { validateVideoFile, videoAcceptAttribute } from '../../lib/videoFile'
 import type { MatchProgressResponse } from '../../services/api'
 
 interface IngestPanelProps {
@@ -11,9 +12,6 @@ interface IngestPanelProps {
   isCompleted: boolean
   onSubmit: (request: AnalysisRequest) => void
 }
-
-const maximumVideoSizeBytes = 1024 * 1024 * 1024
-const allowedExtensions = ['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm']
 
 /** Source form: a video URL (YouTube or direct) or an uploaded file, plus processing feedback. */
 export function IngestPanel({ isSubmitting, progress, errorMessage, isCompleted, onSubmit }: IngestPanelProps) {
@@ -40,13 +38,9 @@ export function IngestPanel({ isSubmitting, progress, errorMessage, isCompleted,
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
     if (!file) return
-    const extension = file.name.split('.').at(-1)?.toLowerCase()
-    if (!allowedExtensions.includes(extension ?? '')) {
-      setFileError('Formato no compatible. Selecciona MP4, M4V, MOV, AVI, MKV o WebM.')
-      return
-    }
-    if (file.size > maximumVideoSizeBytes) {
-      setFileError('El archivo supera el límite de 1 GB.')
+    const validationError = validateVideoFile(file)
+    if (validationError) {
+      setFileError(validationError)
       return
     }
     setSelectedVideo(file)
@@ -88,7 +82,7 @@ export function IngestPanel({ isSubmitting, progress, errorMessage, isCompleted,
               ref={fileInputRef}
               className="sr-only"
               type="file"
-              accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.m4v,.mkv"
+              accept={videoAcceptAttribute}
               aria-label="Seleccionar archivo de video"
               onChange={handleFileChange}
             />

@@ -367,6 +367,19 @@
 
 .workspace-brand strong { color: #b8df73; }
 
+.workspace-brand--home {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.workspace-brand--home:hover { background: rgba(184, 223, 115, 0.1); }
+.workspace-brand--home:focus-visible { outline: 2px solid #b8df73; outline-offset: 2px; }
+
 .workspace-brand__mark {
   display: grid;
   width: 34px;

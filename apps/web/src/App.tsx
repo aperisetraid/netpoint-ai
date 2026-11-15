@@ -4,6 +4,7 @@ import { CourtMap } from './components/court/CourtMap'
 import { IngestPanel } from './components/ingest/IngestPanel'
 import { PlayerNamesDialog, type PlayerNames } from './components/ingest/PlayerNamesDialog'
 import { FrameInspector } from './components/inspector/FrameInspector'
+import { LandingView } from './components/landing/LandingView'
 import { type Theme, WorkspaceHeader } from './components/layout/WorkspaceHeader'
 import { MatchStatsPanel } from './components/stats/MatchStatsPanel'
 import { VideoPlayer } from './components/video/VideoPlayer'
@@ -16,6 +17,7 @@ function App() {
   const [theme, setTheme] = useState<Theme>(() =>
     window.localStorage.getItem('netpoint-theme') === 'light' ? 'light' : 'dark',
   )
+  const [view, setView] = useState<'landing' | 'analysis'>('landing')
   const [playerNames, setPlayerNames] = useState<PlayerNames>({ far: '', near: '' })
   const [pendingRequest, setPendingRequest] = useState<AnalysisRequest | null>(null)
   // Playback position at the rate of the video's own events; the canvas overlay keeps its own clock.
@@ -45,6 +47,7 @@ function App() {
     setIsVideoPlaying(false)
     if (pendingRequest) void start(pendingRequest)
     setPendingRequest(null)
+    setView('analysis')
   }
 
   return (
@@ -54,6 +57,14 @@ function App() {
         onCancel={() => setPendingRequest(null)}
         onConfirm={handlePlayerNames}
       />
+      {view === 'landing' ? (
+        <LandingView
+          theme={theme}
+          onThemeChange={setTheme}
+          onStart={() => setView('analysis')}
+          onSelectVideo={setPendingRequest}
+        />
+      ) : (
       <div className="app-layout">
         <WorkspaceHeader
           title={analysis?.title ?? 'Centro de análisis'}
@@ -61,6 +72,7 @@ function App() {
           frameCount={telemetry ? telemetry.frames.length : null}
           theme={theme}
           onThemeChange={setTheme}
+          onHome={() => setView('landing')}
         />
 
         <IngestPanel
@@ -103,6 +115,7 @@ function App() {
           <MatchStatsPanel telemetry={telemetry} currentTime={currentTime} playerNames={playerNames} />
         </section>
       </div>
+      )}
     </main>
   )
 }

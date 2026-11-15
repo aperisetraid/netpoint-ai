@@ -1,6 +1,8 @@
-import { Moon, Sun } from 'lucide-react'
+import { Home } from 'lucide-react'
 
-export type Theme = 'light' | 'dark'
+import { type Theme, ThemeToggle } from './ThemeToggle'
+
+export type { Theme }
 
 interface WorkspaceHeaderProps {
   title: string
@@ -8,16 +10,18 @@ interface WorkspaceHeaderProps {
   frameCount: number | null
   theme: Theme
   onThemeChange: (theme: Theme) => void
+  onHome: () => void
 }
 
 const statusLabels = { idle: 'En espera', processing: 'En curso', completed: 'Procesado' } as const
 
-export function WorkspaceHeader({ title, status, frameCount, theme, onThemeChange }: WorkspaceHeaderProps) {
+export function WorkspaceHeader({ title, status, frameCount, theme, onThemeChange, onHome }: WorkspaceHeaderProps) {
   return (
     <header className="workspace-header">
-      <div className="workspace-brand">
+      <button type="button" className="workspace-brand workspace-brand--home" onClick={onHome} title="Volver al inicio">
+        <Home size={15} aria-hidden="true" />
         <span>NETPOINT <strong>AI</strong></span>
-      </div>
+      </button>
       <div className="workspace-title">
         <span className="eyebrow">ANÁLISIS DE PARTIDO</span>
         <h1>{title}</h1>
@@ -33,26 +37,7 @@ export function WorkspaceHeader({ title, status, frameCount, theme, onThemeChang
           <strong>{frameCount === null ? '--' : frameCount.toLocaleString('es-ES')}</strong>
         </div>
       </div>
-      <div className="theme-toggle" role="group" aria-label="Tema de la interfaz">
-        <button
-          type="button"
-          aria-label="Modo claro"
-          aria-pressed={theme === 'light'}
-          title="Modo claro"
-          onClick={() => onThemeChange('light')}
-        >
-          <Sun size={17} />
-        </button>
-        <button
-          type="button"
-          aria-label="Modo oscuro"
-          aria-pressed={theme === 'dark'}
-          title="Modo oscuro"
-          onClick={() => onThemeChange('dark')}
-        >
-          <Moon size={17} />
-        </button>
-      </div>
+      <ThemeToggle theme={theme} onThemeChange={onThemeChange} />
     </header>
   )
 }
