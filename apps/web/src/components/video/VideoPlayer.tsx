@@ -10,9 +10,11 @@ interface VideoPlayerProps {
   telemetry: MatchTelemetry | null
   onTimeChange: (time: number) => void
   onPlaybackChange: (playing: boolean) => void
+  /** Shown in the empty state to open the source menu. */
+  onRequestSource?: () => void
 }
 
-export function VideoPlayer({ sourceUrl, telemetry, onTimeChange, onPlaybackChange }: VideoPlayerProps) {
+export function VideoPlayer({ sourceUrl, telemetry, onTimeChange, onPlaybackChange, onRequestSource }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
@@ -42,6 +44,11 @@ export function VideoPlayer({ sourceUrl, telemetry, onTimeChange, onPlaybackChan
           <div className="video-player__empty">
             <Video className="h-8 w-8 text-lime-300" />
             <span>El reproductor se habilita al procesar un video</span>
+            {onRequestSource ? (
+              <button type="button" className="video-player__cta" onClick={onRequestSource}>
+                Cargar un vídeo
+              </button>
+            ) : null}
           </div>
         )}
         {sourceUrl && failedUrl === sourceUrl ? (

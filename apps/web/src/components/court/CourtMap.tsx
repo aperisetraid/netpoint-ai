@@ -83,19 +83,24 @@ function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps,
 /** Top-down court with the players of the current frame and the bounces played so far. */
 export function CourtMap({ hasAnalysis, frame, bounces, playerNames }: CourtMapProps) {
   return (
-    <section className="workspace-panel court-panel analysis-panel--map">
-      <div className="panel-heading">
-        <div>
-          <span className="eyebrow">COORDENADAS MÉTRICAS</span>
-          <h2>Mapa de pista</h2>
-        </div>
+    <section className="court-card" aria-label="Mini-mapa de pista">
+      <div className="court-card__heading">
+        <span className="eyebrow">MINI-MAPA 2D</span>
         <span className="panel-timestamp">
           {frame ? `#${frame.frame_index} · ${formatTime(frame.timestamp_seconds)}` : '--'}
         </span>
       </div>
       <div className="court-map-stage">
         {hasAnalysis ? (
-          <CourtVisualization frame={frame} bounces={bounces} playerNames={playerNames} />
+          <>
+            <CourtVisualization frame={frame} bounces={bounces} playerNames={playerNames} />
+            <ul className="court-legend" aria-label="Leyenda">
+              <li><i className="map-legend__dot map-legend__dot--player" /> Jugadores</li>
+              <li><i className="map-legend__dot court-legend__dot--far" /> Botes (fondo)</li>
+              <li><i className="map-legend__dot court-legend__dot--near" /> Botes (cámara)</li>
+              <li className="court-legend__count">{bounces.length} botes</li>
+            </ul>
+          </>
         ) : (
           <div className="court-map-empty">
             <Radar size={22} />

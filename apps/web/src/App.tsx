@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { CourtMap } from './components/court/CourtMap'
 import { IngestPanel } from './components/ingest/IngestPanel'
 import { PlayerNamesDialog, type PlayerNames } from './components/ingest/PlayerNamesDialog'
-import { FrameInspector } from './components/inspector/FrameInspector'
 import { LandingView } from './components/landing/LandingView'
+import { AnalysisSidebar } from './components/layout/AnalysisSidebar'
 import { type Theme, WorkspaceHeader } from './components/layout/WorkspaceHeader'
 import { ProcessingOverlay } from './components/loader/ProcessingOverlay'
-import { MatchStatsPanel } from './components/stats/MatchStatsPanel'
 import { VideoPlayer } from './components/video/VideoPlayer'
 import { type AnalysisRequest, useMatchAnalysis } from './hooks/useMatchAnalysis'
 import { findFrameAt } from './lib/frameLookup.ts'
 import { getMatchVideoUrl } from './services/api'
 import './App.css'
+import './Workspace.css'
 
 function App() {
   const [theme, setTheme] = useState<Theme>(() =>
@@ -25,10 +24,22 @@ function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const { analysis, errorMessage, isSubmitting, progress, start } = useMatchAnalysis()
+  // Source menu: open by default while there is nothing to show, collapsed once a match is loaded.
+  const [sourceOpen, setSourceOpen] = useState<boolean | null>(null)
+  const showSource = !isSubmitting && (sourceOpen ?? (analysis === null || errorMessage !== null))
 
   useEffect(() => {
     window.localStorage.setItem('netpoint-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    if (!showSource) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSourceOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showSource])
 
   const telemetry = analysis?.telemetry ?? null
   const currentFrame = useMemo(
@@ -66,57 +77,57 @@ function App() {
           onSelectVideo={setPendingRequest}
         />
       ) : (
-      <div className="app-layout">
-        <WorkspaceHeader
-          title={analysis?.title ?? 'Centro de análisis'}
-          status={analysis ? 'completed' : isSubmitting ? 'processing' : 'idle'}
-          frameCount={telemetry ? telemetry.frames.length : null}
-          theme={theme}
-          onThemeChange={setTheme}
-          onHome={() => setView('landing')}
-        />
+      <div className="workspace">
+        <div className="workspace-top">
+          <WorkspaceHeader
+            title={analysis?.title ?? 'Centro de análisis'}
+            status={analysis ? 'completed' : isSubmitting ? 'processing' : 'idle'}
+            frameCount={telemetry ? telemetry.frames.length : null}
+            theme={theme}
+            sourceOpen={showSource}
+            onThemeChange={setTheme}
+            onToggleSource={() => setSourceOpen(!showSource)}
+            onHome={() => setView('landing')}
+          />
 
-        <div className="workspace-body" aria-busy={isSubmitting}>
-          {/* Inert while analysing: no double submits and no reading of partial data. */}
-          <div className="workspace-body__content" inert={isSubmitting}>
+          {/* Floating source menu: it overlays the workspace instead of taking vertical space. */}
+          {showSource ? <div className="source-backdrop" onClick={() => setSourceOpen(false)} aria-hidden="true" /> : null}
+          <div id="source-popover" className="source-popover" data-open={showSource} inert={!showSource}>
             <IngestPanel
               isSubmitting={isSubmitting}
               errorMessage={errorMessage}
               isCompleted={analysis !== null}
-              onSubmit={setPendingRequest}
+              onSubmit={(request) => {
+                setSourceOpen(false)
+                setPendingRequest(request)
+              }}
             />
+          </div>
+        </div>
 
-            <section className="analysis-grid" aria-label="Revisión del partido">
-              <CourtMap
-                hasAnalysis={analysis !== null}
-                frame={currentFrame}
-                bounces={visibleBounces}
-                playerNames={playerNames}
+        <div className="workspace-body" aria-busy={isSubmitting}>
+          {/* Inert while analysing: no double submits and no reading of partial data. */}
+          <div className="workspace-main" inert={isSubmitting}>
+            <section className="stage" aria-label="Reproducción del partido">
+              <VideoPlayer
+                key={analysis?.matchId ?? 'empty'}
+                sourceUrl={analysis ? getMatchVideoUrl(analysis.matchId) : ''}
+                telemetry={telemetry}
+                onTimeChange={setCurrentTime}
+                onPlaybackChange={setIsVideoPlaying}
+                onRequestSource={() => setSourceOpen(true)}
               />
-
-              <section className="workspace-panel source-panel analysis-panel--video">
-                <div className="panel-heading">
-                  <div>
-                    <span className="eyebrow">REPRODUCCIÓN</span>
-                    <h2>Video fuente</h2>
-                  </div>
-                  {analysis?.title ? <span className="source-title">{analysis.title}</span> : null}
-                </div>
-                <VideoPlayer
-                  key={analysis?.matchId ?? 'empty'}
-                  sourceUrl={analysis ? getMatchVideoUrl(analysis.matchId) : ''}
-                  telemetry={telemetry}
-                  onTimeChange={setCurrentTime}
-                  onPlaybackChange={setIsVideoPlaying}
-                />
-              </section>
-
-              <div className="analysis-panel--frames">
-                <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
-              </div>
-
-              <MatchStatsPanel telemetry={telemetry} currentTime={currentTime} playerNames={playerNames} />
             </section>
+
+            <AnalysisSidebar
+              analysis={analysis}
+              telemetry={telemetry}
+              frame={currentFrame}
+              bounces={visibleBounces}
+              currentTime={currentTime}
+              isPlaying={isVideoPlaying}
+              playerNames={playerNames}
+            />
           </div>
           <ProcessingOverlay active={isSubmitting} progress={progress} />
         </div>
