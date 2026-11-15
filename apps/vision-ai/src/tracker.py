@@ -1,5 +1,9 @@
+import bisect
+import importlib.util
 import math
+import os
 from collections.abc import Callable
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,6 +12,7 @@ from ultralytics import YOLO
 from ball_tracking import track_ball
 from court_detector import CourtDetector
 from events import build_events
+from stage_timers import stage
 from homography import (
     COURT_LENGTH_METERS,
     COURT_WIDTH_METERS,
@@ -49,6 +54,16 @@ MOVING_BALL_MIN_CONTRAST = 15
 MOVING_BALL_MIN_PIXELS = 4
 MOVING_BALL_SCORE_PENALTY = 0.4
 COURT_BALL_INFERENCE_SIZE = 960
+# Experimental speed-ups, off by default. Measured against the reference telemetry with
+# benchmark.py, each of them moved discrete events (bounces / hits) out of tolerance:
+#   NETPOINT_PLAYER_STRIDE=2   players every 2 frames, interpolated in between
+#   NETPOINT_PLAYER_ONLY=1     full-frame pass without the ball class (its ball detections matter)
+#   NETPOINT_FULL_IMGSZ=512    lower full-frame resolution (worse players, false hits)
+#   NETPOINT_COURT_STRIDE=2    court-crop ball detector on alternate frames only
+PLAYER_DETECTION_STRIDE = 1
+COURT_BALL_STRIDE = 1
+# Longest gap between two player detections that is bridged by interpolation.
+MAX_PLAYER_INTERPOLATION_GAP_FRAMES = 6
 COURT_BALL_MIN_CONFIDENCE = 0.1
 MAX_BALL_CANDIDATES_PER_SOURCE = 6
 
@@ -179,6 +194,31 @@ def player_within_tracking_region(
     )
 
 
+class FrameFeatures:
+    """HSV image and brightness top-hat of one frame, each computed at most once.
+
+    The colour and motion passes both need them for the frame and for the previous one, and the
+    previous frame's features were the current ones a moment ago.
+    """
+
+    def __init__(self, frame: np.ndarray):
+        self.frame = frame
+        self._hsv: np.ndarray | None = None
+        self._top_hat: np.ndarray | None = None
+
+    @property
+    def hsv(self) -> np.ndarray:
+        if self._hsv is None:
+            self._hsv = cv2.cvtColor(self.frame, cv2.COLOR_BGR2HSV)
+        return self._hsv
+
+    @property
+    def top_hat(self) -> np.ndarray:
+        if self._top_hat is None:
+            self._top_hat = value_top_hat(self.hsv)
+        return self._top_hat
+
+
 def value_top_hat(hsv: np.ndarray) -> np.ndarray:
     return cv2.morphologyEx(
         hsv[:, :, 2],
@@ -190,10 +230,19 @@ def value_top_hat(hsv: np.ndarray) -> np.ndarray:
     )
 
 
-def bright_blob_mask(hsv: np.ndarray, region_mask: np.ndarray) -> np.ndarray:
+def bright_blob_mask(
+    hsv: np.ndarray,
+    region_mask: np.ndarray,
+    top_hat: np.ndarray | None = None,
+) -> np.ndarray:
     return cv2.bitwise_and(
         cv2.bitwise_and(
-            cv2.threshold(value_top_hat(hsv), BRIGHT_BALL_MIN_CONTRAST - 1, 255, cv2.THRESH_BINARY)[1],
+            cv2.threshold(
+                top_hat if top_hat is not None else value_top_hat(hsv),
+                BRIGHT_BALL_MIN_CONTRAST - 1,
+                255,
+                cv2.THRESH_BINARY,
+            )[1],
             cv2.threshold(hsv[:, :, 2], BRIGHT_BALL_MIN_VALUE - 1, 255, cv2.THRESH_BINARY)[1],
         ),
         region_mask,
@@ -229,9 +278,16 @@ def find_ball_color_candidates(
     previous_ball_bbox: list[float] | None = None,
     previous_ball_near_player: bool = False,
     moving_only: bool = False,
+    features: FrameFeatures | None = None,
+    previous_features: FrameFeatures | None = None,
 ) -> list[tuple[float, list[float]]]:
-    """Ball-like blobs as (score, bbox), best first. Most of them are not the ball."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    """Ball-like blobs as (score, bbox), best first. Most of them are not the ball.
+
+    `features` / `previous_features` let a caller that runs several passes over the same frame
+    share the HSV conversions and top-hats instead of recomputing them.
+    """
+    features = features or FrameFeatures(frame)
+    hsv = features.hsv
     mask = cv2.inRange(
         hsv,
         np.asarray((18, 35, 175), dtype=np.uint8),
@@ -252,7 +308,8 @@ def find_ball_color_candidates(
     if motion_mask is not None:
         court_fill = np.zeros(mask.shape, dtype=np.uint8)
         cv2.fillConvexPoly(court_fill, court_polygon.astype(np.int32), 255)
-        previous_hsv = cv2.cvtColor(previous_frame, cv2.COLOR_BGR2HSV)
+        previous_features = previous_features or FrameFeatures(previous_frame)
+        previous_hsv = previous_features.hsv
         if moving_only:
             moving_mask = cv2.bitwise_and(
                 cv2.bitwise_and(
@@ -262,7 +319,7 @@ def find_ball_color_candidates(
                         255,
                         cv2.THRESH_BINARY,
                     )[1],
-                    cv2.threshold(value_top_hat(hsv), MOVING_BALL_MIN_CONTRAST - 1, 255, cv2.THRESH_BINARY)[1],
+                    cv2.threshold(features.top_hat, MOVING_BALL_MIN_CONTRAST - 1, 255, cv2.THRESH_BINARY)[1],
                 ),
                 court_fill,
             )
@@ -276,10 +333,10 @@ def find_ball_color_candidates(
                 if cv2.countNonZero(moving_mask[y:y + height, x:x + width]) >= MOVING_BALL_MIN_PIXELS:
                     contour_sources.append((contour, MOVING_BALL_SCORE_PENALTY))
         else:
-            bright_mask = bright_blob_mask(hsv, court_fill)
+            bright_mask = bright_blob_mask(hsv, court_fill, features.top_hat)
             # Lines and court signage are bright in both frames; dilation absorbs camera jitter.
             previous_bright_mask = cv2.dilate(
-                bright_blob_mask(previous_hsv, court_fill),
+                bright_blob_mask(previous_hsv, court_fill, previous_features.top_hat),
                 np.ones((3, 3), dtype=np.uint8),
             )
             bright_contours, _ = cv2.findContours(
@@ -447,13 +504,105 @@ def detect_tennis_ball_in_court(
     return bbox, confidence
 
 
+def resolve_model(model_size: str, backend: str | None = None) -> tuple[str, str]:
+    """(path to load, backend name) for NETPOINT_BACKEND = pytorch (default) | openvino | auto.
+
+    OpenVINO needs the exported folder next to the weights (`yolo export format=openvino
+    dynamic=True`) and the `openvino` package; `auto` falls back to PyTorch when either is missing.
+    """
+    backend = (backend or os.environ.get("NETPOINT_BACKEND") or "pytorch").lower()
+    if backend not in {"pytorch", "openvino", "auto"}:
+        raise ValueError(f"NETPOINT_BACKEND desconocido: {backend}")
+    if backend != "pytorch":
+        weights = Path(model_size)
+        exported = weights.with_name(f"{weights.stem}_openvino_model")
+        if exported.is_dir() and importlib.util.find_spec("openvino") is not None:
+            return str(exported), "openvino"
+        if backend == "openvino":
+            raise RuntimeError(
+                f"OpenVINO no disponible: falta {exported} o el paquete openvino."
+            )
+    return model_size, "pytorch"
+
+
+def _player_side(detection: dict) -> str:
+    return "left" if detection["x_meters"] < COURT_LENGTH_METERS / 2 else "right"
+
+
+def _blend_players(before: dict, after: dict, weight: float) -> dict:
+    def lerp(first: float, second: float) -> float:
+        return first + (second - first) * weight
+
+    return {
+        **before,
+        "confidence": min(before["confidence"], after["confidence"]),
+        "bbox": [lerp(a, b) for a, b in zip(before["bbox"], after["bbox"])],
+        "x_meters": lerp(before["x_meters"], after["x_meters"]),
+        "y_meters": lerp(before["y_meters"], after["y_meters"]),
+        "interpolated": True,
+    }
+
+
+def fill_skipped_player_frames(telemetry: list[dict], skipped: list[int]) -> None:
+    """Player detections for the frames where the detector did not run, in place.
+
+    Each side is interpolated between the nearest detected frames around the gap; when only an
+    earlier detection is close enough it is carried forward, as for any missed detection.
+    """
+    skipped_frames = set(skipped)
+    anchors: dict[str, list[tuple[int, dict]]] = {"left": [], "right": []}
+    for frame in telemetry:
+        if frame["frame_index"] in skipped_frames:
+            continue
+        for detection in frame["detections"]:
+            if (
+                detection["class"] == "player"
+                and not detection.get("carried_forward")
+                and detection["x_meters"] is not None
+            ):
+                anchors[_player_side(detection)].append((frame["frame_index"], detection))
+
+    for index in skipped:
+        filled = []
+        for side in ("left", "right"):
+            points = anchors[side]
+            position = bisect.bisect_left(points, index, key=lambda point: point[0])
+            before = points[position - 1] if position > 0 else None
+            after = points[position] if position < len(points) else None
+            if (
+                before is not None
+                and after is not None
+                and after[0] - before[0] <= MAX_PLAYER_INTERPOLATION_GAP_FRAMES
+            ):
+                filled.append(_blend_players(before[1], after[1], (index - before[0]) / (after[0] - before[0])))
+            elif before is not None and index - before[0] <= MAX_PLAYER_CARRY_FORWARD_FRAMES:
+                filled.append({**before[1], "carried_forward": True})
+        telemetry[index]["detections"] = filled + telemetry[index]["detections"]
+
+
 class TennisTracker:
+    # Class defaults keep the exhaustive behaviour; __init__ only changes them through the
+    # experimental NETPOINT_* variables above.
+    player_detection_stride = 1
+    court_ball_stride = 1
+    full_frame_classes: list[int] | None = None
+    full_frame_imgsz: int | None = None
+    # Separate instance for the 960 px court crop: alternating input sizes on one OpenVINO model
+    # forces a reshape on every call, which halved its speed.
+    court_model = None
+
     def __init__(self, model_size: str = "yolov8n.pt"):
-        print(f"🔄 Cargando modelo YOLOv8 ({model_size})...")
-        self.model = YOLO(model_size)
+        model_path, self.backend = resolve_model(model_size)
+        print(f"🔄 Cargando modelo YOLOv8 ({model_path}, backend {self.backend})...")
+        self.model = YOLO(model_path, task="detect")
+        self.court_model = YOLO(model_path, task="detect")
         self.court_detector = CourtDetector()
         # Clases de COCO: 0 = persona (jugadores), 32 = pelota de tenis
         self.target_classes = [0, 32]
+        self.player_detection_stride = int(os.environ.get("NETPOINT_PLAYER_STRIDE", PLAYER_DETECTION_STRIDE))
+        self.court_ball_stride = int(os.environ.get("NETPOINT_COURT_STRIDE", COURT_BALL_STRIDE))
+        self.full_frame_classes = [0] if os.environ.get("NETPOINT_PLAYER_ONLY") == "1" else None
+        self.full_frame_imgsz = int(os.environ.get("NETPOINT_FULL_IMGSZ", "0")) or None
 
     def process_video(
         self,
@@ -480,16 +629,21 @@ class TennisTracker:
         last_player_by_side = {}
         last_player_frame_by_side = {}
         previous_video_frame = None
+        previous_features = None
+        last_player_bboxes: list[list[float]] = []
+        skipped_player_frames: list[int] = []
         ball_candidates_by_frame = []
         if progress_callback is not None:
             progress_callback(0, total_frames)
         print("🚀 Iniciando inferencia con YOLOv8...")
 
         while cap.isOpened() and (max_frames is None or frame_count < max_frames):
-            ret, frame = cap.read()
+            with stage("decode"):
+                ret, frame = cap.read()
             if not ret:
                 break
             image_height, image_width = frame.shape[:2]
+            features = FrameFeatures(frame)
 
             should_detect_court = (
                 frame_count % CALIBRATION_RETRY_INTERVAL == 0
@@ -507,7 +661,8 @@ class TennisTracker:
                         f"{CALIBRATION_WINDOW_FRAMES} frames; se reintentará "
                         f"cada {CALIBRATION_RETRY_INTERVAL} frames."
                     )
-                detected_corners = self.court_detector.detect_corners(frame)
+                with stage("court_detect"):
+                    detected_corners = self.court_detector.detect_corners(frame)
                 court_corners = detected_corners
                 if detected_corners is None or len(detected_corners) != 4:
                     if homography_matrix is not None:
@@ -568,7 +723,18 @@ class TennisTracker:
                         pass
 
             # Inferencia filtrada por personas y pelotas de tenis
-            results = self.model(frame, classes=self.target_classes, conf=0.12, verbose=False)
+            run_player_detection = frame_count % self.player_detection_stride == 0
+            boxes = []
+            if run_player_detection:
+                inference_options = {
+                    "classes": self.full_frame_classes or self.target_classes,
+                    "conf": 0.12,
+                    "verbose": False,
+                }
+                if self.full_frame_imgsz:
+                    inference_options["imgsz"] = self.full_frame_imgsz
+                with stage("yolo_full"):
+                    boxes = self.model(frame, **inference_options)[0].boxes
             frame_index = frame_count
             timestamp_seconds = (
                 frame_index / fps
@@ -577,9 +743,9 @@ class TennisTracker:
             )
             detections = []
             player_candidates_by_side = {}
-            player_bboxes = []
+            player_bboxes = [] if run_player_detection else last_player_bboxes
             ball_candidates = []
-            for box in results[0].boxes:
+            for box in boxes:
                 class_id = int(box.cls[0].item())
                 confidence = float(box.conf[0].item())
                 if class_id == 0 and confidence < PLAYER_MIN_CONFIDENCE:
@@ -673,35 +839,49 @@ class TennisTracker:
                 )
             ]
             if homography_matrix is not None:
-                if not frame_ball_candidates:
-                    frame_ball_candidates.extend(
-                        {"bbox": bbox, "confidence": confidence, "source": "yolo_court"}
-                        for confidence, bbox in find_balls_in_court(
-                            frame,
-                            calibrated_corners,
-                            self.model,
-                        )[:MAX_BALL_CANDIDATES_PER_SOURCE]
-                        if not ball_candidate_near_player(bbox, player_bboxes)
-                    )
+                cheap_candidates = []
                 if previous_video_frame is not None:
                     for source, moving_only in (("color", False), ("motion", True)):
+                        with stage(f"ball_{source}"):
+                            cheap_candidates.extend(
+                                {
+                                    "bbox": bbox,
+                                    "confidence": max(0.0, min(1.0, score / 2)),
+                                    "source": source,
+                                }
+                                for score, bbox in find_ball_color_candidates(
+                                    frame,
+                                    calibrated_corners,
+                                    previous_video_frame,
+                                    player_bboxes,
+                                    moving_only=moving_only,
+                                    features=features,
+                                    previous_features=previous_features,
+                                )[:MAX_BALL_CANDIDATES_PER_SOURCE]
+                            )
+                # The court-crop detector is the most expensive step: it runs on alternate frames,
+                # and in any frame where the cheap detectors found nothing at all.
+                if not frame_ball_candidates and (
+                    frame_count % self.court_ball_stride == 0 or not cheap_candidates
+                ):
+                    with stage("yolo_court"):
                         frame_ball_candidates.extend(
-                            {
-                                "bbox": bbox,
-                                "confidence": max(0.0, min(1.0, score / 2)),
-                                "source": source,
-                            }
-                            for score, bbox in find_ball_color_candidates(
+                            {"bbox": bbox, "confidence": confidence, "source": "yolo_court"}
+                            for confidence, bbox in find_balls_in_court(
                                 frame,
                                 calibrated_corners,
-                                previous_video_frame,
-                                player_bboxes,
-                                moving_only=moving_only,
+                                self.court_model or self.model,
                             )[:MAX_BALL_CANDIDATES_PER_SOURCE]
+                            if not ball_candidate_near_player(bbox, player_bboxes)
                         )
+                frame_ball_candidates.extend(cheap_candidates)
             ball_candidates_by_frame.append(frame_ball_candidates)
 
-            if homography_matrix is not None:
+            if run_player_detection:
+                last_player_bboxes = player_bboxes
+            if homography_matrix is not None and not run_player_detection:
+                skipped_player_frames.append(frame_index)
+            elif homography_matrix is not None:
                 selected_players = []
                 for side in ("left", "right"):
                     player = player_candidates_by_side.get(side)
@@ -733,6 +913,7 @@ class TennisTracker:
             })
             frame_count += 1
             previous_video_frame = frame
+            previous_features = features
             if progress_callback is not None and (
                 frame_count % 5 == 0
                 or (total_frames is not None and frame_count >= total_frames)
@@ -746,7 +927,9 @@ class TennisTracker:
         cap.release()
         cv2.destroyAllWindows()
         print(f"✨ Inferencia completada. {frame_count} fotogramas analizados.")
-        ball_summary = track_ball(telemetry, ball_candidates_by_frame, image_width)
+        fill_skipped_player_frames(telemetry, skipped_player_frames)
+        with stage("track_ball"):
+            ball_summary = track_ball(telemetry, ball_candidates_by_frame, image_width)
         print(
             f"🎾 Pelota: {ball_summary['measured_frames']} fotogramas medidos y "
             f"{ball_summary['interpolated_frames']} interpolados de {frame_count}; "
@@ -757,6 +940,8 @@ class TennisTracker:
                 "⚠️ No se pudo calibrar la pista; las coordenadas métricas "
                 "quedan como null."
             )
+        with stage("build_events"):
+            events = build_events(telemetry, image_width, image_height)
         return {
             "version": 2,
             "video": {
@@ -771,5 +956,5 @@ class TennisTracker:
                 "calibrated": homography_matrix is not None,
             },
             "frames": telemetry,
-            "events": build_events(telemetry, image_width, image_height),
+            "events": events,
         }

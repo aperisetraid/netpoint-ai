@@ -24,6 +24,7 @@ env/
 *.weights
 *.pt
 *.onnx
+*_openvino_model/
 
 # IDEs
 .vscode/
