@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 
 import type {
-  FrameTelemetry,
   MatchProgressResponse,
   MatchProcessRequest,
   MatchProcessResponse,
   MatchRegistry,
+  MatchTelemetry,
 } from '../domain/match.entity.js';
 
 const VISION_SERVICE_URL = 'http://localhost:8000/process-video';
@@ -14,7 +14,7 @@ const VISION_UPLOAD_URL = 'http://localhost:8000/process-upload';
 const VISION_PROGRESS_URL = 'http://localhost:8000/matches';
 
 interface VisionServiceResponse {
-  telemetry: FrameTelemetry[];
+  telemetry: MatchTelemetry;
 }
 
 interface VisionServiceProgress {
@@ -30,11 +30,18 @@ export class VisionServiceError extends Error {
 }
 
 function isVisionServiceResponse(value: unknown): value is VisionServiceResponse {
+  if (typeof value !== 'object' || value === null || !('telemetry' in value)) {
+    return false;
+  }
+  const telemetry = value.telemetry as Partial<MatchTelemetry> | null;
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    'telemetry' in value &&
-    Array.isArray(value.telemetry)
+    typeof telemetry === 'object' &&
+    telemetry !== null &&
+    typeof telemetry.video === 'object' &&
+    telemetry.video !== null &&
+    Array.isArray(telemetry.frames) &&
+    Array.isArray(telemetry.events?.bounces) &&
+    Array.isArray(telemetry.events?.hits)
   );
 }
 
@@ -190,9 +197,9 @@ export class ProcessMatchUseCase {
     matchId: string,
     sourceUrl: string,
     title: string | undefined,
-    frameTelemetry: FrameTelemetry[],
+    matchTelemetry: MatchTelemetry,
   ): MatchProcessResponse {
-    const telemetry = { matchId, telemetry: frameTelemetry };
+    const telemetry = { matchId, telemetry: matchTelemetry };
     this.matchRegistry.save({
       matchId,
       sourceUrl,

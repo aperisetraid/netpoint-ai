@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import cv2
 from fastapi import FastAPI, Header, HTTPException, Path as PathParameter, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from main import process_video_file, run_pipeline
@@ -65,6 +65,15 @@ async def get_video_frame(match_id: str, frame_index: int = PathParameter(ge=0))
     return Response(content=image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/matches/{match_id}/video")
+async def get_match_video(match_id: str):
+    video = processed_videos.get(match_id)
+    if video is None or not video[0].is_file():
+        raise HTTPException(status_code=404, detail="Video no disponible.")
+    # FileResponse honours Range requests, which the browser needs to seek.
+    return FileResponse(video[0])
+
+
 @app.post("/process-video")
 async def process_video(request: ProcessVideoRequest):
     output_dir = match_video_root / str(uuid4())
@@ -78,7 +87,7 @@ async def process_video(request: ProcessVideoRequest):
     )
     video_path = next(output_dir.glob("*.mp4"), None)
     if video_path is not None:
-        processed_videos[request.matchId] = (video_path, len(telemetry))
+        processed_videos[request.matchId] = (video_path, telemetry["video"]["frame_count"])
     return {
         "matchId": request.matchId,
         "telemetry": telemetry,
@@ -125,7 +134,7 @@ async def process_video_upload(
         video_path.unlink(missing_ok=True)
         raise
 
-    processed_videos[match_id] = (video_path, len(telemetry))
+    processed_videos[match_id] = (video_path, telemetry["video"]["frame_count"])
     return {"matchId": match_id, "telemetry": telemetry}
 
 

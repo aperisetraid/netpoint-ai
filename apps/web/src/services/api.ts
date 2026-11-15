@@ -7,7 +7,7 @@ export interface ProcessMatchRequest {
 export interface ProcessMatchResponse {
   matchId: string
   status: 'completed'
-  telemetry: FrameTelemetry[]
+  telemetry: MatchTelemetry
 }
 
 export interface DetectionTelemetry {
@@ -16,6 +16,8 @@ export interface DetectionTelemetry {
   bbox: [number, number, number, number]
   x_meters: number | null
   y_meters: number | null
+  /** Ball height from the 3D flight fit; null when it could not be reconstructed. */
+  z_meters?: number | null
   carried_forward?: boolean
 }
 
@@ -23,14 +25,45 @@ export interface FrameTelemetry {
   frame_index: number
   timestamp_seconds: number
   detections: DetectionTelemetry[]
-  image_width?: number
-  image_height?: number
   court_corners?: [number, number][] | null
+}
+
+export type PlayerSide = 'far' | 'near'
+export type ShotType = 'serve' | 'volley' | 'forehand' | 'backhand'
+
+export interface BounceEvent {
+  timestamp_seconds: number
+  frame_index: number
+  x_meters: number
+  y_meters: number
+  side: PlayerSide
+  confidence: number
+  method: 'fit3d' | 'image2d'
+}
+
+export interface HitEvent {
+  timestamp_seconds: number
+  frame_index: number
+  player: PlayerSide
+  type: ShotType
+  speed_kmh: number | null
+  point_index: number
+  ball: { x: number | null; y: number | null; z: number | null }
+  player_position: { x: number; y: number }
+  confidence: number
+}
+
+export interface MatchTelemetry {
+  version: number
+  video: { fps: number | null; width: number; height: number; frame_count: number }
+  court: { length_meters: number; width_meters: number; calibrated: boolean }
+  frames: FrameTelemetry[]
+  events: { bounces: BounceEvent[]; hits: HitEvent[] }
 }
 
 export interface MatchTelemetryResponse {
   matchId: string
-  telemetry: FrameTelemetry[]
+  telemetry: MatchTelemetry
 }
 
 const defaultApiBaseUrl = 'http://localhost:3000'
@@ -40,6 +73,10 @@ const visionBaseUrl = (import.meta.env.VITE_VISION_BASE_URL || 'http://localhost
 
 export function getMatchFrameUrl(matchId: string, frameIndex: number): string {
   return `${visionBaseUrl}/matches/${encodeURIComponent(matchId)}/frames/${frameIndex}`
+}
+
+export function getMatchVideoUrl(matchId: string): string {
+  return `${visionBaseUrl}/matches/${encodeURIComponent(matchId)}/video`
 }
 
 export class ApiError extends Error {

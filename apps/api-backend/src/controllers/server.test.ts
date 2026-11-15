@@ -6,7 +6,7 @@ import { load as loadYaml } from 'js-yaml';
 
 import { buildApp } from './server.js';
 
-const pythonTelemetry = [
+const pythonFrames = [
   {
     frame_index: 0,
     timestamp_seconds: 0,
@@ -24,10 +24,19 @@ const pythonTelemetry = [
         bbox: [40, 50, 46, 56],
         x_meters: null,
         y_meters: null,
+        z_meters: null,
       },
     ],
   },
 ];
+
+const pythonTelemetry = {
+  version: 2,
+  video: { fps: 30, width: 1280, height: 720, frame_count: 1 },
+  court: { length_meters: 23.77, width_meters: 10.97, calibrated: false },
+  frames: pythonFrames,
+  events: { bounces: [], hits: [] },
+};
 
 const pythonRequests: Array<{ url: string; payload: { youtubeUrl: string; matchId: string } }> = [];
 
@@ -243,19 +252,45 @@ test('health and documentation endpoints are available', async () => {
 });
 
 test('process and telemetry endpoints preserve frame inspection metadata', async () => {
-  const inspectedTelemetry = [{
-    ...pythonTelemetry[0],
-    image_width: 1280,
-    image_height: 720,
-    court_corners: [[100, 50], [1100, 50], [1200, 650], [50, 650]],
-    detections: [{ ...pythonTelemetry[0].detections[0], carried_forward: true }],
-  }, {
-    ...pythonTelemetry[0],
-    frame_index: 1,
-    image_width: 1280,
-    image_height: 720,
-    court_corners: null,
-  }];
+  const inspectedTelemetry = {
+    ...pythonTelemetry,
+    video: { fps: null, width: 1280, height: 720, frame_count: 2 },
+    court: { ...pythonTelemetry.court, calibrated: true },
+    frames: [{
+      ...pythonFrames[0],
+      court_corners: [[100, 50], [1100, 50], [1200, 650], [50, 650]],
+      detections: [
+        { ...pythonFrames[0].detections[0], carried_forward: true },
+        { ...pythonFrames[0].detections[1], x_meters: 12.5, y_meters: 4.1, z_meters: 0.9 },
+      ],
+    }, {
+      ...pythonFrames[0],
+      frame_index: 1,
+      court_corners: null,
+    }],
+    events: {
+      bounces: [{
+        timestamp_seconds: 0.52,
+        frame_index: 15,
+        x_meters: 6.6,
+        y_meters: 5.8,
+        side: 'far',
+        confidence: 0.9,
+        method: 'fit3d',
+      }],
+      hits: [{
+        timestamp_seconds: 0.1,
+        frame_index: 3,
+        player: 'near',
+        type: 'forehand',
+        speed_kmh: null,
+        point_index: 0,
+        ball: { x: 21.5, y: 5.5, z: null },
+        player_position: { x: 22.5, y: 5.6 },
+        confidence: 0.5,
+      }],
+    },
+  };
   const inspectionApp = await buildApp({
     fetchImpl: async () => new Response(JSON.stringify({ telemetry: inspectedTelemetry })),
   });
@@ -320,6 +355,22 @@ test('POST /api/v1/matches/upload streams an allowed video and stores its teleme
     assert.deepEqual(telemetry.json().telemetry, pythonTelemetry);
   } finally {
     await uploadApp.close();
+  }
+});
+
+test('POST /api/v1/matches/process returns 502 for telemetry without frames and events', async () => {
+  const legacyApp = await buildApp({
+    fetchImpl: async () => new Response(JSON.stringify({ telemetry: pythonFrames })),
+  });
+  try {
+    const response = await legacyApp.inject({
+      method: 'POST',
+      url: '/api/v1/matches/process',
+      payload: { sourceUrl: 'https://example.com/video.mp4' },
+    });
+    assert.equal(response.statusCode, 502);
+  } finally {
+    await legacyApp.close();
   }
 });
 

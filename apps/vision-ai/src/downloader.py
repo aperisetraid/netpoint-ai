@@ -7,7 +7,11 @@ def download_youtube_video(url: str, output_dir: str = "./temp") -> str:
     
     ydl_opts = {
         # YouTube ya no sirve streams progresivos para muchos vídeos; fusionamos con FFmpeg
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        # H.264 primero: el navegador reproduce este mismo archivo junto al overlay
+        'format': (
+            'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]'
+            '/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        ),
         'merge_output_format': 'mp4',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False,

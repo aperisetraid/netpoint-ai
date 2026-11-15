@@ -6,6 +6,7 @@ import numpy as np
 from ultralytics import YOLO
 
 from court_detector import CourtDetector
+from events import build_events
 from homography import (
     COURT_LENGTH_METERS,
     COURT_WIDTH_METERS,
@@ -432,6 +433,8 @@ class TennisTracker:
         if max_frames is not None and total_frames is not None:
             total_frames = min(total_frames, max_frames)
         frame_count = 0
+        image_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        image_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         telemetry = []
         homography_matrix = None
         calibrated_corners = None
@@ -448,6 +451,7 @@ class TennisTracker:
             ret, frame = cap.read()
             if not ret:
                 break
+            image_height, image_width = frame.shape[:2]
 
             should_detect_court = (
                 frame_count % CALIBRATION_RETRY_INTERVAL == 0
@@ -732,8 +736,6 @@ class TennisTracker:
             telemetry.append({
                 "frame_index": frame_index,
                 "timestamp_seconds": timestamp_seconds,
-                "image_width": frame.shape[1],
-                "image_height": frame.shape[0],
                 "court_corners": calibrated_corners,
                 "detections": detections,
             })
@@ -757,4 +759,19 @@ class TennisTracker:
                 "⚠️ No se pudo calibrar la pista; las coordenadas métricas "
                 "quedan como null."
             )
-        return telemetry
+        return {
+            "version": 2,
+            "video": {
+                "fps": fps if fps > 0 else None,
+                "width": image_width,
+                "height": image_height,
+                "frame_count": frame_count,
+            },
+            "court": {
+                "length_meters": COURT_LENGTH_METERS,
+                "width_meters": COURT_WIDTH_METERS,
+                "calibrated": homography_matrix is not None,
+            },
+            "frames": telemetry,
+            "events": build_events(telemetry, image_width, image_height),
+        }

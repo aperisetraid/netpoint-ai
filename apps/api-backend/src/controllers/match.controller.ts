@@ -20,6 +20,7 @@ const DETECTION_SCHEMA = {
     },
     x_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
     y_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+    z_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
     carried_forward: { type: 'boolean' },
   },
 } as const;
@@ -31,8 +32,6 @@ const FRAME_SCHEMA = {
   properties: {
     frame_index: { type: 'integer' },
     timestamp_seconds: { type: 'number' },
-    image_width: { type: 'integer', minimum: 1 },
-    image_height: { type: 'integer', minimum: 1 },
     court_corners: {
       anyOf: [
         {
@@ -51,16 +50,108 @@ const FRAME_SCHEMA = {
   },
 } as const;
 
+const NULLABLE_NUMBER = { anyOf: [{ type: 'number' }, { type: 'null' }] } as const;
+const COURT_SIDE = { type: 'string', enum: ['far', 'near'] } as const;
+
+const BOUNCE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['timestamp_seconds', 'frame_index', 'x_meters', 'y_meters', 'side', 'confidence', 'method'],
+  properties: {
+    timestamp_seconds: { type: 'number' },
+    frame_index: { type: 'integer' },
+    x_meters: { type: 'number' },
+    y_meters: { type: 'number' },
+    side: COURT_SIDE,
+    confidence: { type: 'number' },
+    method: { type: 'string', enum: ['fit3d', 'image2d'] },
+  },
+} as const;
+
+const HIT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'timestamp_seconds',
+    'frame_index',
+    'player',
+    'type',
+    'speed_kmh',
+    'point_index',
+    'ball',
+    'player_position',
+    'confidence',
+  ],
+  properties: {
+    timestamp_seconds: { type: 'number' },
+    frame_index: { type: 'integer' },
+    player: COURT_SIDE,
+    type: { type: 'string', enum: ['serve', 'volley', 'forehand', 'backhand'] },
+    speed_kmh: NULLABLE_NUMBER,
+    point_index: { type: 'integer' },
+    ball: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['x', 'y', 'z'],
+      properties: { x: NULLABLE_NUMBER, y: NULLABLE_NUMBER, z: NULLABLE_NUMBER },
+    },
+    player_position: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['x', 'y'],
+      properties: { x: { type: 'number' }, y: { type: 'number' } },
+    },
+    confidence: { type: 'number' },
+  },
+} as const;
+
+const MATCH_TELEMETRY_OBJECT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['version', 'video', 'court', 'frames', 'events'],
+  properties: {
+    version: { type: 'integer' },
+    video: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['fps', 'width', 'height', 'frame_count'],
+      properties: {
+        fps: NULLABLE_NUMBER,
+        width: { type: 'integer', minimum: 0 },
+        height: { type: 'integer', minimum: 0 },
+        frame_count: { type: 'integer', minimum: 0 },
+      },
+    },
+    court: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['length_meters', 'width_meters', 'calibrated'],
+      properties: {
+        length_meters: { type: 'number' },
+        width_meters: { type: 'number' },
+        calibrated: { type: 'boolean' },
+      },
+    },
+    frames: { type: 'array', items: FRAME_SCHEMA },
+    events: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['bounces', 'hits'],
+      properties: {
+        bounces: { type: 'array', items: BOUNCE_SCHEMA },
+        hits: { type: 'array', items: HIT_SCHEMA },
+      },
+    },
+  },
+} as const;
+
 const TELEMETRY_RESPONSE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['matchId', 'telemetry'],
   properties: {
     matchId: { type: 'string' },
-    telemetry: {
-      type: 'array',
-      items: FRAME_SCHEMA,
-    },
+    telemetry: MATCH_TELEMETRY_OBJECT_SCHEMA,
   },
 } as const;
 
@@ -83,10 +174,7 @@ const PROCESS_MATCH_SCHEMA = {
       properties: {
         matchId: { type: 'string' },
         status: { type: 'string', enum: ['completed'] },
-        telemetry: {
-          type: 'array',
-          items: FRAME_SCHEMA,
-        },
+        telemetry: MATCH_TELEMETRY_OBJECT_SCHEMA,
       },
     },
     502: {

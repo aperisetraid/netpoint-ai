@@ -216,9 +216,7 @@ components:
           enum: [completed]
           example: "completed"
         telemetry:
-          type: array
-          items:
-            $ref: '#/components/schemas/FrameTelemetry'
+          $ref: '#/components/schemas/MatchTelemetry'
 
     MatchStatusResponse:
       type: object
@@ -266,9 +264,135 @@ components:
           type: string
           format: uuid
         telemetry:
+          $ref: '#/components/schemas/MatchTelemetry'
+
+    MatchTelemetry:
+      type: object
+      additionalProperties: false
+      description: Telemetría consolidada del partido (contrato v2).
+      required: [version, video, court, frames, events]
+      properties:
+        version:
+          type: integer
+          example: 2
+        video:
+          type: object
+          additionalProperties: false
+          required: [fps, width, height, frame_count]
+          properties:
+            fps:
+              type: number
+              nullable: true
+            width:
+              type: integer
+              minimum: 0
+            height:
+              type: integer
+              minimum: 0
+            frame_count:
+              type: integer
+              minimum: 0
+        court:
+          type: object
+          additionalProperties: false
+          required: [length_meters, width_meters, calibrated]
+          properties:
+            length_meters:
+              type: number
+              example: 23.77
+            width_meters:
+              type: number
+              example: 10.97
+            calibrated:
+              type: boolean
+        frames:
           type: array
           items:
             $ref: '#/components/schemas/FrameTelemetry'
+        events:
+          type: object
+          additionalProperties: false
+          required: [bounces, hits]
+          properties:
+            bounces:
+              type: array
+              items:
+                $ref: '#/components/schemas/BounceEvent'
+            hits:
+              type: array
+              items:
+                $ref: '#/components/schemas/HitEvent'
+
+    BounceEvent:
+      type: object
+      additionalProperties: false
+      required: [timestamp_seconds, frame_index, x_meters, y_meters, side, confidence, method]
+      properties:
+        timestamp_seconds:
+          type: number
+          description: Instante del bote, con resolución inferior a un fotograma.
+        frame_index:
+          type: integer
+        x_meters:
+          type: number
+        y_meters:
+          type: number
+        side:
+          type: string
+          enum: [far, near]
+        confidence:
+          type: number
+        method:
+          type: string
+          enum: [fit3d, image2d]
+          description: fit3d si la posición procede del ajuste balístico 3D; image2d si solo de la trayectoria en imagen.
+
+    HitEvent:
+      type: object
+      additionalProperties: false
+      required: [timestamp_seconds, frame_index, player, type, speed_kmh, point_index, ball, player_position, confidence]
+      properties:
+        timestamp_seconds:
+          type: number
+        frame_index:
+          type: integer
+        player:
+          type: string
+          enum: [far, near]
+        type:
+          type: string
+          enum: [serve, volley, forehand, backhand]
+        speed_kmh:
+          type: number
+          nullable: true
+          description: Velocidad estimada de salida de la pelota; null si no se pudo medir.
+        point_index:
+          type: integer
+        ball:
+          type: object
+          additionalProperties: false
+          required: [x, y, z]
+          properties:
+            x:
+              type: number
+              nullable: true
+            y:
+              type: number
+              nullable: true
+            z:
+              type: number
+              nullable: true
+        player_position:
+          type: object
+          additionalProperties: false
+          required: [x, y]
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+        confidence:
+          type: number
 
     FrameTelemetry:
       type: object
@@ -284,12 +408,6 @@ components:
         timestamp_seconds:
           type: number
           example: 0.04
-        image_width:
-          type: integer
-          minimum: 1
-        image_height:
-          type: integer
-          minimum: 1
         court_corners:
           type: array
           nullable: true
@@ -342,6 +460,10 @@ components:
           nullable: true
           description: Posición en metros a lo ancho de la pista; null si la pista no está calibrada.
           example: 4.5
+        z_meters:
+          type: number
+          nullable: true
+          description: Altura estimada de la pelota por ajuste balístico; null si no se pudo reconstruir.
 
     ChatQueryRequest:
       type: object

@@ -58,15 +58,21 @@ class FrameInspectionTests(unittest.TestCase):
             "tracker.detect_tennis_ball_color",
             return_value=([30.0, 20.0, 34.0, 24.0], 0.6),
         ):
-            telemetry = tracker.process_video(str(self.video_path))
+            result = tracker.process_video(str(self.video_path))
+        telemetry = result["frames"]
+        self.assertEqual(result["version"], 2)
+        self.assertEqual(result["video"], {"fps": 25.0, "width": 64, "height": 48, "frame_count": 3})
+        self.assertTrue(result["court"]["calibrated"])
+        self.assertEqual(result["events"], {"bounces": [], "hits": []})
         self.assertEqual(len(telemetry), 3)
-        self.assertEqual(telemetry[1]["image_width"], 64)
-        self.assertEqual(telemetry[1]["image_height"], 48)
         self.assertEqual(telemetry[2]["court_corners"], corners)
-        self.assertTrue(any(
-            detection["class"] == "ball"
+        balls = [
+            detection
             for detection in telemetry[2]["detections"]
-        ))
+            if detection["class"] == "ball"
+        ]
+        self.assertTrue(balls)
+        self.assertIn("z_meters", balls[0])
 
     def test_tracker_refreshes_court_calibration_every_five_frames(self):
         video_path = Path(self.directory.name) / "long-video.mp4"
@@ -90,7 +96,7 @@ class FrameInspectionTests(unittest.TestCase):
         telemetry = tracker.process_video(
             str(video_path),
             progress_callback=lambda processed, total: progress_updates.append((processed, total)),
-        )
+        )["frames"]
 
         self.assertEqual(len(telemetry), 12)
         self.assertEqual(len(detected_frames), 5)
@@ -116,7 +122,7 @@ class FrameInspectionTests(unittest.TestCase):
             detect_corners=lambda frame: next(candidates)
         )
 
-        telemetry = tracker.process_video(str(video_path))
+        telemetry = tracker.process_video(str(video_path))["frames"]
 
         self.assertTrue(all(frame["court_corners"] is None for frame in telemetry[:7]))
         self.assertEqual(telemetry[7]["court_corners"], correct_corners)
@@ -135,7 +141,7 @@ class FrameInspectionTests(unittest.TestCase):
         tracker.model = lambda *args, **kwargs: [SimpleNamespace(boxes=boxes)]
         tracker.court_detector = SimpleNamespace(detect_corners=lambda frame: None)
 
-        telemetry = tracker.process_video(str(self.video_path))
+        telemetry = tracker.process_video(str(self.video_path))["frames"]
 
         self.assertTrue(all(
             detection["class"] != "player"
@@ -162,12 +168,20 @@ class FrameInspectionTests(unittest.TestCase):
             detect_corners=lambda frame: next(detections)
         )
 
-        telemetry = tracker.process_video(str(video_path))
+        telemetry = tracker.process_video(str(video_path))["frames"]
 
         self.assertEqual(len(telemetry), 22)
         self.assertTrue(all(frame["court_corners"] is None for frame in telemetry[:2]))
         self.assertTrue(all(frame["court_corners"] == corners for frame in telemetry[2:20]))
         self.assertTrue(all(frame["court_corners"] == outlier for frame in telemetry[20:]))
+
+    def test_video_endpoint_serves_the_analysed_file(self):
+        server.processed_videos["test"] = (self.video_path, 3)
+        response = asyncio.run(server.get_match_video("test"))
+        self.assertEqual(Path(response.path), self.video_path)
+        with self.assertRaises(server.HTTPException) as caught:
+            asyncio.run(server.get_match_video("missing"))
+        self.assertEqual(caught.exception.status_code, 404)
 
     def test_video_progress_endpoint_returns_current_frame_count(self):
         server.progress_by_match["progress-test"] = {
@@ -195,7 +209,7 @@ class FrameInspectionTests(unittest.TestCase):
         corners = [(0, 0), (63, 0), (63, 40), (0, 40)]
         tracker.court_detector = SimpleNamespace(detect_corners=lambda frame: corners)
 
-        telemetry = tracker.process_video(str(self.video_path))
+        telemetry = tracker.process_video(str(self.video_path))["frames"]
 
         player = next(
             detection
@@ -217,7 +231,7 @@ class FrameInspectionTests(unittest.TestCase):
         corners = [(0, 20), (63, 20), (63, 40), (0, 40)]
         tracker.court_detector = SimpleNamespace(detect_corners=lambda frame: corners)
 
-        telemetry = TennisTracker.process_video(tracker, str(self.video_path))
+        telemetry = TennisTracker.process_video(tracker, str(self.video_path))["frames"]
 
         player = next(
             detection
@@ -246,7 +260,7 @@ class FrameInspectionTests(unittest.TestCase):
         corners = [(0, 0), (63, 0), (63, 40), (0, 40)]
         tracker.court_detector = SimpleNamespace(detect_corners=lambda frame: corners)
 
-        telemetry = tracker.process_video(str(self.video_path))
+        telemetry = tracker.process_video(str(self.video_path))["frames"]
 
         self.assertFalse(any(
             detection["class"] == "player"
@@ -280,7 +294,7 @@ class FrameInspectionTests(unittest.TestCase):
         corners = [(0, 0), (63, 0), (63, 40), (0, 40)]
         tracker.court_detector = SimpleNamespace(detect_corners=lambda frame: corners)
 
-        telemetry = tracker.process_video(str(video_path))
+        telemetry = tracker.process_video(str(video_path))["frames"]
 
         self.assertTrue(any(
             detection.get("carried_forward")
@@ -301,13 +315,13 @@ class FrameInspectionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(server, "match_video_root", Path(directory)):
-                with patch.object(server, "process_video_file", return_value=[{"frame_index": 0}]) as process:
+                with patch.object(server, "process_video_file", return_value={"video": {"frame_count": 1}}) as process:
                     response = asyncio.run(server.process_video_upload(
                         UploadRequest(), "upload-test", "final%20match.mp4"
                     ))
 
             self.assertEqual(response["matchId"], "upload-test")
-            self.assertEqual(response["telemetry"], [{"frame_index": 0}])
+            self.assertEqual(response["telemetry"], {"video": {"frame_count": 1}})
             uploaded_path = process.call_args.args[0]
             self.assertEqual(uploaded_path.name, "final match.mp4")
             self.assertEqual(uploaded_path.read_bytes(), b"video content")
@@ -589,7 +603,7 @@ class FrameInspectionTests(unittest.TestCase):
         self.assertAlmostEqual((bbox[0] + bbox[2]) / 2, 230, delta=3)
 
     def test_completed_analysis_registers_its_own_video(self):
-        telemetry = [{"frame_index": 0}]
+        telemetry = {"video": {"frame_count": 1}}
         with patch.object(server, "run_pipeline", return_value=telemetry) as pipeline:
             with patch.object(Path, "glob", return_value=iter([self.video_path])):
                 response = asyncio.run(server.process_video(
