@@ -6,6 +6,7 @@ import { PlayerNamesDialog, type PlayerNames } from './components/ingest/PlayerN
 import { FrameInspector } from './components/inspector/FrameInspector'
 import { LandingView } from './components/landing/LandingView'
 import { type Theme, WorkspaceHeader } from './components/layout/WorkspaceHeader'
+import { ProcessingOverlay } from './components/loader/ProcessingOverlay'
 import { MatchStatsPanel } from './components/stats/MatchStatsPanel'
 import { VideoPlayer } from './components/video/VideoPlayer'
 import { type AnalysisRequest, useMatchAnalysis } from './hooks/useMatchAnalysis'
@@ -75,45 +76,50 @@ function App() {
           onHome={() => setView('landing')}
         />
 
-        <IngestPanel
-          isSubmitting={isSubmitting}
-          progress={progress}
-          errorMessage={errorMessage}
-          isCompleted={analysis !== null}
-          onSubmit={setPendingRequest}
-        />
-
-        <section className="analysis-grid" aria-label="Revisión del partido">
-          <CourtMap
-            hasAnalysis={analysis !== null}
-            frame={currentFrame}
-            bounces={visibleBounces}
-            playerNames={playerNames}
-          />
-
-          <section className="workspace-panel source-panel analysis-panel--video">
-            <div className="panel-heading">
-              <div>
-                <span className="eyebrow">REPRODUCCIÓN</span>
-                <h2>Video fuente</h2>
-              </div>
-              {analysis?.title ? <span className="source-title">{analysis.title}</span> : null}
-            </div>
-            <VideoPlayer
-              key={analysis?.matchId ?? 'empty'}
-              sourceUrl={analysis ? getMatchVideoUrl(analysis.matchId) : ''}
-              telemetry={telemetry}
-              onTimeChange={setCurrentTime}
-              onPlaybackChange={setIsVideoPlaying}
+        <div className="workspace-body" aria-busy={isSubmitting}>
+          {/* Inert while analysing: no double submits and no reading of partial data. */}
+          <div className="workspace-body__content" inert={isSubmitting}>
+            <IngestPanel
+              isSubmitting={isSubmitting}
+              errorMessage={errorMessage}
+              isCompleted={analysis !== null}
+              onSubmit={setPendingRequest}
             />
-          </section>
 
-          <div className="analysis-panel--frames">
-            <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
+            <section className="analysis-grid" aria-label="Revisión del partido">
+              <CourtMap
+                hasAnalysis={analysis !== null}
+                frame={currentFrame}
+                bounces={visibleBounces}
+                playerNames={playerNames}
+              />
+
+              <section className="workspace-panel source-panel analysis-panel--video">
+                <div className="panel-heading">
+                  <div>
+                    <span className="eyebrow">REPRODUCCIÓN</span>
+                    <h2>Video fuente</h2>
+                  </div>
+                  {analysis?.title ? <span className="source-title">{analysis.title}</span> : null}
+                </div>
+                <VideoPlayer
+                  key={analysis?.matchId ?? 'empty'}
+                  sourceUrl={analysis ? getMatchVideoUrl(analysis.matchId) : ''}
+                  telemetry={telemetry}
+                  onTimeChange={setCurrentTime}
+                  onPlaybackChange={setIsVideoPlaying}
+                />
+              </section>
+
+              <div className="analysis-panel--frames">
+                <FrameInspector analysis={analysis} frame={currentFrame} isPlaying={isVideoPlaying} />
+              </div>
+
+              <MatchStatsPanel telemetry={telemetry} currentTime={currentTime} playerNames={playerNames} />
+            </section>
           </div>
-
-          <MatchStatsPanel telemetry={telemetry} currentTime={currentTime} playerNames={playerNames} />
-        </section>
+          <ProcessingOverlay active={isSubmitting} progress={progress} />
+        </div>
       </div>
       )}
     </main>

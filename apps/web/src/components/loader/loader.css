@@ -1,0 +1,159 @@
+.processing-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(8, 12, 10, 0.58);
+  padding: 24px 16px;
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  animation: processing-in 260ms ease both;
+}
+
+.processing-overlay.is-leaving {
+  pointer-events: none;
+  animation: processing-out 320ms ease forwards;
+}
+
+/* Keeps the card centred in the viewport while the workspace is taller than the screen. */
+.processing-overlay__card {
+  position: sticky;
+  top: calc(50vh - 190px);
+  width: min(100%, 440px);
+  border: 1px solid rgba(184, 223, 115, 0.28);
+  border-radius: 14px;
+  background: #0f1713;
+  padding: 18px;
+  box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  color: #edf2e8;
+}
+
+.workspace-body { position: relative; }
+.workspace-body__content { display: grid; gap: 18px; }
+
+.retro-loader { display: grid; gap: 14px; }
+.retro-loader__eyebrow { color: #b8df73; text-align: center; }
+
+.retro-loader__screen {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid rgba(184, 223, 115, 0.4);
+  border-radius: 6px;
+  background: #0c1110;
+  box-shadow: 0 0 24px rgba(184, 223, 115, 0.12);
+}
+
+/* CRT scanlines */
+.retro-loader__screen::after {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 4px);
+  content: '';
+  pointer-events: none;
+}
+
+.retro-loader__court {
+  display: flex;
+  height: 140px;
+  justify-content: center;
+}
+
+.retro-loader__court canvas {
+  display: block;
+  height: 140px;
+  image-rendering: pixelated;
+}
+
+.retro-loader__bar {
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(184, 223, 115, 0.4);
+  border-radius: 3px;
+  background: #0c1110;
+  padding: 2px;
+}
+
+/* Segmented fill, like a classic game energy bar */
+.retro-loader__fill {
+  height: 100%;
+  background: repeating-linear-gradient(90deg, #bef264 0 6px, transparent 6px 8px);
+  transition: width 400ms linear;
+}
+
+.retro-loader__bar.is-indeterminate .retro-loader__fill {
+  width: 30%;
+  animation: retro-scan 1.4s steps(14) infinite;
+}
+
+.retro-loader__counter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: #94a39a;
+  font-size: 12px;
+}
+
+.retro-loader__counter strong {
+  color: #d4eb9d;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.retro-loader__message {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
+  margin: 0;
+  color: #bef264;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.retro-loader__message span { animation: retro-type 320ms steps(8) both; }
+
+.retro-loader__cursor {
+  width: 7px;
+  height: 13px;
+  margin-left: 4px;
+  background: #bef264;
+  animation: retro-blink 1s steps(1) infinite;
+}
+
+@keyframes processing-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes processing-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes retro-blink {
+  50% { opacity: 0; }
+}
+
+@keyframes retro-type {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes retro-scan {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+.app-shell[data-theme='light'] .processing-overlay { background: rgba(238, 243, 235, 0.6); }
+
+@media (prefers-reduced-motion: reduce) {
+  .processing-overlay,
+  .processing-overlay.is-leaving,
+  .retro-loader__message span,
+  .retro-loader__cursor,
+  .retro-loader__bar.is-indeterminate .retro-loader__fill { animation: none; }
+  .retro-loader__fill { transition: none; }
+}

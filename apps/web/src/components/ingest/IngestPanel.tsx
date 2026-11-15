@@ -3,18 +3,16 @@ import { AlertTriangle, CheckCircle2, Link2, RefreshCw, Upload, Video } from 'lu
 
 import type { AnalysisRequest } from '../../hooks/useMatchAnalysis'
 import { validateVideoFile, videoAcceptAttribute } from '../../lib/videoFile'
-import type { MatchProgressResponse } from '../../services/api'
 
 interface IngestPanelProps {
   isSubmitting: boolean
-  progress: MatchProgressResponse
   errorMessage: string | null
   isCompleted: boolean
   onSubmit: (request: AnalysisRequest) => void
 }
 
-/** Source form: a video URL (YouTube or direct) or an uploaded file, plus processing feedback. */
-export function IngestPanel({ isSubmitting, progress, errorMessage, isCompleted, onSubmit }: IngestPanelProps) {
+/** Source form: a video URL (YouTube or direct) or an uploaded file, plus the final result notice. */
+export function IngestPanel({ isSubmitting, errorMessage, isCompleted, onSubmit }: IngestPanelProps) {
   const [inputMode, setInputMode] = useState<'url' | 'file'>('url')
   const [sourceUrl, setSourceUrl] = useState('')
   const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
@@ -118,16 +116,6 @@ export function IngestPanel({ isSubmitting, progress, errorMessage, isCompleted,
           {isSubmitting ? 'Analizando' : 'Analizar'}
         </button>
       </form>
-
-      {isSubmitting ? (
-        <div className="processing-status" role="status" aria-live="polite">
-          <span>Fotogramas procesados</span>
-          <strong>
-            {progress.processedFrames.toLocaleString('es-ES')}
-            {progress.totalFrames !== null ? ` / ${progress.totalFrames.toLocaleString('es-ES')}` : ''}
-          </strong>
-        </div>
-      ) : null}
 
       {visibleError ? (
         <div className="notice notice--error" role="alert">
