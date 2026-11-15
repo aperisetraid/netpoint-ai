@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 
+import { longRunningFetch } from '../infrastructure/long-running-fetch.js';
 import type {
   MatchProgressResponse,
   MatchProcessRequest,
@@ -79,7 +80,7 @@ export class ProcessMatchUseCase {
   constructor({
     matchRegistry,
     generateMatchId = randomUUID,
-    fetchImpl = fetch,
+    fetchImpl = longRunningFetch,
   }: ProcessMatchDependencies) {
     this.matchRegistry = matchRegistry;
     this.generateMatchId = generateMatchId;
