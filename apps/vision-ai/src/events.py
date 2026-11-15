@@ -70,6 +70,9 @@ BOUNCE_OUT_MARGIN_METERS = 3.0
 MIN_UNANCHORED_FLIGHT_SAMPLES = 10
 MIN_UNANCHORED_FLIGHT_SECONDS = 0.4
 
+# A ball placed by a fitted flight in a frame where it was not seen.
+FLIGHT_BALL_CONFIDENCE = 0.4
+
 CONFIDENCE_IMAGE_ONLY = 0.5
 CONFIDENCE_ONE_FLIGHT = 0.75
 CONFIDENCE_TWO_FLIGHTS = 0.9
@@ -448,6 +451,67 @@ def reconstruct_flights(
     return flights
 
 
+def fill_flight_gaps(
+    frames: Sequence[dict],
+    cameras: Sequence[Camera | None],
+    image_size: tuple[int, int],
+    flights: Sequence[tuple[Flight, list[BallSample], Contact | None, Contact | None]],
+) -> None:
+    """Place the ball where its fitted flight says it was in the frames it was not seen in.
+
+    The flight obeys gravity and drag and is pinned by the measurements on both sides of the
+    gap, so this is a better estimate than the image interpolation it replaces.
+    """
+    for flight, samples, _, _ in flights:
+        widths = sorted(sample.ball["bbox"][2] - sample.ball["bbox"][0] for sample in samples)
+        heights = sorted(sample.ball["bbox"][3] - sample.ball["bbox"][1] for sample in samples)
+        half_width, half_height = widths[len(widths) // 2] / 2, heights[len(heights) // 2] / 2
+        first = samples[0].frame_position
+        while first > 0 and frames[first - 1]["timestamp_seconds"] >= flight.start_time:
+            first -= 1
+        last = samples[-1].frame_position
+        while last + 1 < len(frames) and frames[last + 1]["timestamp_seconds"] <= flight.end_time:
+            last += 1
+        for position in range(first, last + 1):
+            frame = frames[position]
+            time = frame["timestamp_seconds"]
+            camera = cameras[position]
+            if (
+                camera is None
+                or not flight.start_time <= time <= flight.end_time
+                or best_ball(frame) is not None
+            ):
+                continue
+            x, y, z = flight.position_at(time)
+            pixel = camera.project((x, y, max(0.0, z)))
+            if pixel is None or not (0 <= pixel[0] < image_size[0] and 0 <= pixel[1] < image_size[1]):
+                continue
+            estimate = next(
+                (
+                    detection for detection in frame["detections"]
+                    if detection["class"] == "ball" and detection.get("interpolated")
+                ),
+                None,
+            )
+            if estimate is None:
+                estimate = {"class": "ball"}
+                frame["detections"].append(estimate)
+            estimate.update({
+                "confidence": FLIGHT_BALL_CONFIDENCE,
+                "bbox": [
+                    pixel[0] - half_width,
+                    pixel[1] - half_height,
+                    pixel[0] + half_width,
+                    pixel[1] + half_height,
+                ],
+                "x_meters": x,
+                "y_meters": y,
+                "z_meters": max(0.0, z),
+                "interpolated": True,
+                "source": "flight3d",
+            })
+
+
 def bounce_is_physical(landing: Flight, leaving: Flight, time: float) -> bool:
     """Whether two flights meeting at `time` look like one ball bouncing off the ground."""
     x_in, y_in, _, vx_in, vy_in, vz_in = landing.state_at(time)
@@ -678,6 +742,7 @@ def build_events(
             sample.ball["x_meters"] = x
             sample.ball["y_meters"] = y
             sample.ball["z_meters"] = max(0.0, z)
+    fill_flight_gaps(frames, cameras, (image_width, image_height), flights)
 
     return {"bounces": bounces, "hits": hits}
 

@@ -19,6 +19,9 @@ export interface DetectionTelemetry {
   /** Ball height from the 3D flight fit; null when it could not be reconstructed. */
   z_meters?: number | null
   carried_forward?: boolean
+  /** Ball position estimated from its trajectory in a frame where it was not detected. */
+  interpolated?: boolean
+  source?: 'yolo' | 'yolo_court' | 'color' | 'motion' | 'interpolated' | 'flight3d'
 }
 
 export interface FrameTelemetry {

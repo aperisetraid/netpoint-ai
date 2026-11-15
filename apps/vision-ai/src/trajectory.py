@@ -59,11 +59,13 @@ def is_finite_number(value) -> bool:
 
 
 def best_ball(frame: dict, min_confidence: float = 0.0, predicate=None) -> dict | None:
+    """The measured ball of a frame; estimated positions are not evidence of how it moved."""
     best = None
     for detection in frame["detections"]:
         if (
             detection["class"] != "ball"
             or detection.get("carried_forward")
+            or detection.get("interpolated")
             or detection["confidence"] < min_confidence
             or not all(is_finite_number(value) for value in detection["bbox"])
             or (predicate is not None and not predicate(detection))

@@ -444,6 +444,15 @@ components:
         carried_forward:
           type: boolean
           description: Indica una posición de jugador reutilizada de un fotograma anterior, no una detección nueva.
+        interpolated:
+          type: boolean
+          description: Indica una posición de pelota estimada a partir de su trayectoria en un fotograma donde no se detectó; no es una medición.
+        source:
+          type: string
+          enum: [yolo, yolo_court, color, motion, interpolated, flight3d]
+          description: >-
+            Origen de la posición de la pelota: un detector (yolo, yolo_court, color, motion) validado por su trayectoria,
+            la interpolación en imagen entre mediciones (interpolated) o el vuelo balístico 3D ajustado (flight3d).
         bbox:
           type: array
           minItems: 4

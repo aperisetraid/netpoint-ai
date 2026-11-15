@@ -22,6 +22,8 @@ const DETECTION_SCHEMA = {
     y_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
     z_meters: { anyOf: [{ type: 'number' }, { type: 'null' }] },
     carried_forward: { type: 'boolean' },
+    interpolated: { type: 'boolean' },
+    source: { type: 'string', enum: ['yolo', 'yolo_court', 'color', 'motion', 'interpolated', 'flight3d'] },
   },
 } as const;
 

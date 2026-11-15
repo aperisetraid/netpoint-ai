@@ -44,14 +44,15 @@ export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers
           {frame.detections.filter((detection) => layers[detection.class]).map((detection, index) => {
             const [left, top, right, bottom] = detection.bbox
             const height = typeof detection.z_meters === 'number' ? ` · ${detection.z_meters.toFixed(1)} m` : ''
-            const label = `${detection.class === 'player' ? 'Jugador' : 'Pelota'} ${formatPercent(detection.confidence * 100)}${height}${detection.carried_forward ? ' (previo)' : ''}`
+            const estimated = detection.carried_forward || detection.interpolated
+            const label = `${detection.class === 'player' ? 'Jugador' : 'Pelota'} ${formatPercent(detection.confidence * 100)}${height}${detection.carried_forward ? ' (previo)' : detection.interpolated ? ' (estimada)' : ''}`
             const labelY = Math.max(labelSize * 1.3, top)
             const labelWidth = label.length * labelSize * 0.6
             const labelX = Math.max(0, Math.min(left, imageWidth - labelWidth))
             return (
               <g key={`${detection.class}-${index}`} className={`frame-overlay__${detection.class}`}>
                 <rect x={left} y={top} width={Math.max(0, right - left)} height={Math.max(0, bottom - top)}
-                  className={detection.carried_forward ? 'frame-overlay__carried' : undefined} />
+                  className={estimated ? 'frame-overlay__carried' : undefined} />
                 <rect className="frame-overlay__label-bg" x={labelX} y={labelY - labelSize * 1.3} width={labelWidth} height={labelSize * 1.3} />
                 <text x={labelX + labelSize * 0.2} y={labelY - labelSize * 0.25} fontSize={labelSize}>{label}</text>
               </g>

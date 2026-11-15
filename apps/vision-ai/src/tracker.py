@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+from ball_tracking import track_ball
 from court_detector import CourtDetector
 from events import build_events
 from homography import (
@@ -49,6 +50,7 @@ MOVING_BALL_MIN_PIXELS = 4
 MOVING_BALL_SCORE_PENALTY = 0.4
 COURT_BALL_INFERENCE_SIZE = 960
 COURT_BALL_MIN_CONFIDENCE = 0.1
+MAX_BALL_CANDIDATES_PER_SOURCE = 6
 
 
 def ball_candidate_near_player(
@@ -219,7 +221,7 @@ def bright_blob_is_static(
     )
 
 
-def detect_tennis_ball_color(
+def find_ball_color_candidates(
     frame: np.ndarray,
     court_corners: list[tuple[int, int]],
     previous_frame: np.ndarray | None = None,
@@ -227,7 +229,8 @@ def detect_tennis_ball_color(
     previous_ball_bbox: list[float] | None = None,
     previous_ball_near_player: bool = False,
     moving_only: bool = False,
-) -> tuple[list[float], float] | None:
+) -> list[tuple[float, list[float]]]:
+    """Ball-like blobs as (score, bbox), best first. Most of them are not the ball."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
         hsv,
@@ -350,8 +353,6 @@ def detect_tennis_ball_color(
         player_distance = distance_to_nearest_player(center, player_bboxes or [])
         if player_distance is not None and player_distance <= 120:
             score += 1.5 * (1.0 - player_distance / 120)
-        if moving_only and previous_ball_bbox is None:
-            continue
         if previous_ball_bbox is not None:
             previous_center = (
                 (previous_ball_bbox[0] + previous_ball_bbox[2]) / 2,
@@ -366,17 +367,43 @@ def detect_tennis_ball_color(
                 score += continuity_weight * (1.0 - distance / max_displacement)
         candidates.append((score, area, bbox))
 
+    candidates.sort(key=lambda candidate: candidate[0] + candidate[1] / max_area * 0.1, reverse=True)
+    return [(score, bbox) for score, _, bbox in candidates]
+
+
+def detect_tennis_ball_color(
+    frame: np.ndarray,
+    court_corners: list[tuple[int, int]],
+    previous_frame: np.ndarray | None = None,
+    player_bboxes: list[list[float]] | None = None,
+    previous_ball_bbox: list[float] | None = None,
+    previous_ball_near_player: bool = False,
+    moving_only: bool = False,
+) -> tuple[list[float], float] | None:
+    """Best single-frame colour guess; without temporal validation it is often wrong."""
+    if moving_only and previous_ball_bbox is None:
+        return None
+    candidates = find_ball_color_candidates(
+        frame,
+        court_corners,
+        previous_frame,
+        player_bboxes,
+        previous_ball_bbox,
+        previous_ball_near_player,
+        moving_only,
+    )
     if not candidates:
         return None
-    circularity, _, bbox = max(candidates, key=lambda candidate: candidate[0] + candidate[1] / max_area * 0.1)
-    return bbox, min(0.65, 0.45 + circularity * 0.2)
+    score, bbox = candidates[0]
+    return bbox, min(0.65, 0.45 + score * 0.2)
 
 
-def detect_tennis_ball_in_court(
+def find_balls_in_court(
     frame: np.ndarray,
     court_corners: list[tuple[int, int]],
     model: YOLO,
-) -> tuple[list[float], float] | None:
+) -> list[tuple[float, list[float]]]:
+    """Every ball the detector sees in an enlarged crop of the court, as (confidence, bbox)."""
     height, width = frame.shape[:2]
     court_x, court_y, court_width, court_height = cv2.boundingRect(
         np.asarray(court_corners, dtype=np.int32)
@@ -404,9 +431,19 @@ def detect_tennis_ball_in_court(
         if point_in_ball_tracking_region(center, court_corners):
             candidates.append((confidence, bbox))
 
+    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+    return candidates
+
+
+def detect_tennis_ball_in_court(
+    frame: np.ndarray,
+    court_corners: list[tuple[int, int]],
+    model: YOLO,
+) -> tuple[list[float], float] | None:
+    candidates = find_balls_in_court(frame, court_corners, model)
     if not candidates:
         return None
-    confidence, bbox = max(candidates, key=lambda candidate: candidate[0])
+    confidence, bbox = candidates[0]
     return bbox, confidence
 
 
@@ -443,6 +480,7 @@ class TennisTracker:
         last_player_by_side = {}
         last_player_frame_by_side = {}
         previous_video_frame = None
+        ball_candidates_by_frame = []
         if progress_callback is not None:
             progress_callback(0, total_frames)
         print("🚀 Iniciando inferencia con YOLOv8...")
@@ -613,8 +651,14 @@ class TennisTracker:
                 ):
                     player_candidates_by_side[side] = detection
 
-            detections.extend(
-                detection
+            # A single frame cannot tell the ball from a glint on a line, so every plausible
+            # candidate is kept and the ball is chosen afterwards from how they move over time.
+            frame_ball_candidates = [
+                {
+                    "bbox": detection["bbox"],
+                    "confidence": detection["confidence"],
+                    "source": "yolo",
+                }
                 for detection in ball_candidates
                 if not ball_candidate_near_player(detection["bbox"], player_bboxes)
                 or (
@@ -627,87 +671,35 @@ class TennisTracker:
                         calibrated_corners,
                     )
                 )
-            )
-
-            if homography_matrix is not None and previous_video_frame is not None and not any(
-                detection["class"] == "ball" for detection in detections
-            ):
-                previous_ball_bbox = None
-                previous_ball_near_player = False
-                if telemetry:
-                    previous_detections = telemetry[-1]["detections"]
-                    previous_ball = next(
-                        (
-                            detection
-                            for detection in reversed(previous_detections)
-                            if detection["class"] == "ball"
-                        ),
-                        None,
+            ]
+            if homography_matrix is not None:
+                if not frame_ball_candidates:
+                    frame_ball_candidates.extend(
+                        {"bbox": bbox, "confidence": confidence, "source": "yolo_court"}
+                        for confidence, bbox in find_balls_in_court(
+                            frame,
+                            calibrated_corners,
+                            self.model,
+                        )[:MAX_BALL_CANDIDATES_PER_SOURCE]
+                        if not ball_candidate_near_player(bbox, player_bboxes)
                     )
-                    if previous_ball is not None:
-                        previous_ball_bbox = previous_ball["bbox"]
-                        previous_players = [
-                            detection["bbox"]
-                            for detection in previous_detections
-                            if detection["class"] == "player"
-                        ]
-                        previous_ball_center = (
-                            (previous_ball_bbox[0] + previous_ball_bbox[2]) / 2,
-                            (previous_ball_bbox[1] + previous_ball_bbox[3]) / 2,
+                if previous_video_frame is not None:
+                    for source, moving_only in (("color", False), ("motion", True)):
+                        frame_ball_candidates.extend(
+                            {
+                                "bbox": bbox,
+                                "confidence": max(0.0, min(1.0, score / 2)),
+                                "source": source,
+                            }
+                            for score, bbox in find_ball_color_candidates(
+                                frame,
+                                calibrated_corners,
+                                previous_video_frame,
+                                player_bboxes,
+                                moving_only=moving_only,
+                            )[:MAX_BALL_CANDIDATES_PER_SOURCE]
                         )
-                        previous_player_distance = distance_to_nearest_player(
-                            previous_ball_center,
-                            previous_players,
-                        )
-                        previous_ball_near_player = (
-                            previous_player_distance is not None
-                            and previous_player_distance <= 60
-                        )
-                ball_candidate = detect_tennis_ball_color(
-                    frame,
-                    calibrated_corners,
-                    previous_video_frame,
-                    player_bboxes,
-                    previous_ball_bbox,
-                    previous_ball_near_player,
-                )
-                if ball_candidate is None:
-                    ball_candidate = detect_tennis_ball_in_court(
-                        frame,
-                        calibrated_corners,
-                        self.model,
-                    )
-                if ball_candidate is None:
-                    ball_candidate = detect_tennis_ball_color(
-                        frame,
-                        calibrated_corners,
-                        previous_video_frame,
-                        player_bboxes,
-                        previous_ball_bbox,
-                        previous_ball_near_player,
-                        moving_only=True,
-                    )
-                if ball_candidate is not None:
-                    bbox, confidence = ball_candidate
-                    x1, y1, x2, y2 = bbox
-                    try:
-                        x_meters, y_meters = transform_point(
-                            ((x1 + x2) / 2, y2),
-                            homography_matrix,
-                        )
-                    except (ValueError, cv2.error):
-                        x_meters = y_meters = None
-                    if point_in_ball_tracking_region(
-                        ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
-                        calibrated_corners,
-                    ):
-                        detections.append({
-                            "class": "ball",
-                            "confidence": confidence,
-                            "bbox": bbox,
-                            "x_meters": x_meters,
-                            "y_meters": y_meters,
-                        })
+            ball_candidates_by_frame.append(frame_ball_candidates)
 
             if homography_matrix is not None:
                 selected_players = []
@@ -754,6 +746,12 @@ class TennisTracker:
         cap.release()
         cv2.destroyAllWindows()
         print(f"✨ Inferencia completada. {frame_count} fotogramas analizados.")
+        ball_summary = track_ball(telemetry, ball_candidates_by_frame, image_width)
+        print(
+            f"🎾 Pelota: {ball_summary['measured_frames']} fotogramas medidos y "
+            f"{ball_summary['interpolated_frames']} interpolados de {frame_count}; "
+            f"{ball_summary['rejected_candidates']} candidatos descartados."
+        )
         if homography_matrix is None:
             print(
                 "⚠️ No se pudo calibrar la pista; las coordenadas métricas "

@@ -53,7 +53,7 @@ export function FrameInspector({ analysis, frame, isPlaying }: FrameInspectorPro
       )}
       {analysis && frame && !isPlaying ? (
         <div className="frame-inspector__status">
-          {frame.detections.some((detection) => detection.carried_forward) ? <span>Posiciones previas en línea discontinua</span> : null}
+          {frame.detections.some((detection) => detection.carried_forward || detection.interpolated) ? <span>Posiciones previas o estimadas en línea discontinua</span> : null}
         </div>
       ) : null}
     </section>
