@@ -1,6 +1,7 @@
-import { ChevronDown, Home, Library, Plus, Sparkles } from 'lucide-react'
+import { ChevronDown, Plus, Sparkles } from 'lucide-react'
 
-import { type Theme, ThemeToggle } from './ThemeToggle'
+import { AppNav } from './AppNav'
+import type { Theme } from './ThemeToggle'
 
 export type { Theme }
 
@@ -20,56 +21,57 @@ interface WorkspaceHeaderProps {
   onLibrary: () => void
 }
 
-const statusLabels = { idle: 'En espera', processing: 'Procesando', completed: 'Procesado' } as const
+const statusLabels = { idle: 'Sin partido', processing: 'Analizando', completed: 'Analizado' } as const
 
 export function WorkspaceHeader({
   title, status, frameCount, theme, sourceOpen, coachOpen, coachEnabled,
   onThemeChange, onToggleSource, onToggleCoach, onHome, onLibrary,
 }: WorkspaceHeaderProps) {
   return (
-    <header className="workspace-header">
-      <button type="button" className="workspace-brand workspace-brand--home" onClick={onHome} title="Volver al inicio">
-        <Home size={15} aria-hidden="true" />
-        <span>NETPOINT <strong>AI</strong></span>
-      </button>
-
-      <div className="workspace-title">
-        <h1>{title}</h1>
-        <span className={`status-pill status-pill--${status}`}>
-          <i aria-hidden="true" />
-          {statusLabels[status]}
-          {frameCount !== null ? <em>· {frameCount.toLocaleString('es-ES')} frames</em> : null}
-        </span>
-      </div>
-
-      <button
-        type="button"
-        className="coach-trigger"
-        aria-pressed={coachOpen}
-        aria-controls="side-panel"
-        disabled={!coachEnabled}
-        onClick={onToggleCoach}
-        title={coachEnabled ? 'Conversar con el coach táctico' : 'Analiza o abre un partido para hablar con el coach'}
-      >
-        <Sparkles size={15} aria-hidden="true" />
-        <span>Coach</span>
-      </button>
-      <button type="button" className="library-link" onClick={onLibrary} title="Partidos analizados">
-        <Library size={15} aria-hidden="true" />
-        <span>Biblioteca</span>
-      </button>
-      <button
-        type="button"
-        className="source-trigger"
-        aria-expanded={sourceOpen}
-        aria-controls="source-popover"
-        onClick={onToggleSource}
-      >
-        <Plus size={15} aria-hidden="true" />
-        <span>Nuevo análisis</span>
-        <ChevronDown size={14} aria-hidden="true" className="source-trigger__chevron" />
-      </button>
-      <ThemeToggle theme={theme} onThemeChange={onThemeChange} />
-    </header>
+    <AppNav
+      theme={theme}
+      onThemeChange={onThemeChange}
+      onHome={onHome}
+      links={(
+        <>
+          <button type="button" aria-current="page">Análisis</button>
+          <button type="button" onClick={onLibrary}>Biblioteca</button>
+        </>
+      )}
+      actions={(
+        <>
+          <button
+            type="button"
+            className="btn btn--secondary coach-trigger"
+            aria-pressed={coachOpen}
+            aria-controls="side-panel"
+            disabled={!coachEnabled}
+            onClick={onToggleCoach}
+            title={coachEnabled ? 'Conversar con el coach sobre este partido' : 'Analiza o abre un partido para hablar con el coach'}
+          >
+            <Sparkles size={15} aria-hidden="true" />
+            <span>Coach</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary source-trigger"
+            aria-expanded={sourceOpen}
+            aria-controls="source-popover"
+            onClick={onToggleSource}
+          >
+            <Plus size={15} aria-hidden="true" />
+            <span>Nuevo análisis</span>
+            <ChevronDown size={14} aria-hidden="true" className="source-trigger__chevron" />
+          </button>
+        </>
+      )}
+    >
+      <h1 className="workspace-title" title={title}>{title}</h1>
+      <span className={`status-pill status-pill--${status}`}>
+        <i aria-hidden="true" />
+        {statusLabels[status]}
+        {frameCount !== null ? <span className="status-pill__count">{frameCount.toLocaleString('es-ES')} fotogramas</span> : null}
+      </span>
+    </AppNav>
   )
 }

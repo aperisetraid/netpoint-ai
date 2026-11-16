@@ -1,48 +1,34 @@
-import { ArrowRight, PlayCircle } from 'lucide-react'
-
 interface HeroSectionProps {
   onStart: () => void
 }
 
-const heroMetrics = [
-  { value: 'YOLOv8', label: 'Detección' },
-  { value: 'solvePnP', label: 'Calibración' },
-  { value: 'Tiempo real', label: 'Telemetría' },
-]
-
-/** Stylised court seen from above with an animated ball trajectory and bounce. */
-function CourtIllustration() {
+/**
+ * Full-width hard court seen from the broadcast camera. One rally plays once on load:
+ * the ball leaves the camera-side player, bounces in the far half (numbered, in that half's
+ * colour, as on the workspace court map) and reaches the far player.
+ * Court units are centimetres: 2377 × 1097, doubles lines.
+ */
+function CourtScene() {
   return (
-    <svg className="landing-court" viewBox="0 0 360 520" role="img" aria-label="Pista de tenis con la trayectoria de la bola">
-      <defs>
-        <linearGradient id="landing-trail" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0" stopColor="#38bdf8" stopOpacity="0" />
-          <stop offset="1" stopColor="#38bdf8" />
-        </linearGradient>
-      </defs>
-      <rect x="20" y="20" width="320" height="480" rx="10" className="landing-court__surface" />
-      <g className="landing-court__lines" fill="none">
-        <rect x="52" y="52" width="256" height="416" />
-        <line x1="88" y1="52" x2="88" y2="468" />
-        <line x1="272" y1="52" x2="272" y2="468" />
-        <line x1="88" y1="154" x2="272" y2="154" />
-        <line x1="88" y1="366" x2="272" y2="366" />
-        <line x1="180" y1="154" x2="180" y2="366" />
-        <line x1="20" y1="260" x2="340" y2="260" className="landing-court__net" />
+    <svg className="hero-court" viewBox="-160 -110 2697 1317" role="img"
+      aria-label="Pista de tenis con la trayectoria de una bola y su bote marcado">
+      <rect x="-160" y="-110" width="2697" height="1317" className="hero-court__apron" />
+      <rect x="0" y="0" width="2377" height="1097" className="hero-court__surface" />
+      <g className="hero-court__lines">
+        <rect x="0" y="0" width="2377" height="1097" />
+        <path d="M0 137H2377M0 960H2377M548.5 137V960M1828.5 137V960M548.5 548.5H1828.5M0 548.5H22M2355 548.5H2377" />
       </g>
-      <path
-        className="landing-court__path"
-        d="M96 430 C 130 330, 170 290, 196 176 S 250 110, 262 84"
-        fill="none"
-        stroke="url(#landing-trail)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <circle className="landing-court__bounce" cx="196" cy="176" r="6" />
-      <circle className="landing-court__bounce landing-court__bounce--delayed" cx="196" cy="176" r="6" />
-      <circle className="landing-court__ball" cx="262" cy="84" r="6" />
-      <circle className="landing-court__player" cx="96" cy="430" r="9" />
-      <text className="landing-court__label" x="112" y="434">J1</text>
+      <path d="M1188.5 -60V1157" className="hero-court__net" />
+
+      <path className="hero-court__path" pathLength={1} d="M70 800 Q 820 330 1690 420 Q 2000 445 2270 330" />
+      <circle className="hero-court__ripple" cx="1690" cy="420" r="40" />
+      <g className="hero-court__bounce">
+        <circle cx="1690" cy="420" r="46" />
+        <text x="1690" y="440" textAnchor="middle">1</text>
+      </g>
+      <circle className="hero-court__player hero-court__player--near" cx="40" cy="820" r="40" />
+      <circle className="hero-court__player hero-court__player--far" cx="2400" cy="250" r="40" />
+      <circle className="hero-court__ball" cx="2270" cy="330" r="20" />
     </svg>
   )
 }
@@ -50,40 +36,23 @@ function CourtIllustration() {
 export function HeroSection({ onStart }: HeroSectionProps) {
   return (
     <section className="landing-hero" aria-labelledby="landing-title">
-      <div className="landing-hero__copy">
-        <span className="landing-badge">
-          <span className="landing-badge__dot" aria-hidden="true" />
-          TFM · Visión por computador aplicada al tenis
-        </span>
-        <h1 id="landing-title">
-          Analiza el tenis en <span className="landing-gradient-text">3D</span>, golpe a golpe
-        </h1>
-        <p className="landing-hero__subtitle">
-          NetPoint AI reconstruye la pista y los jugadores a partir de un vídeo con YOLOv8, calcula la cinemática de
-          los botes y convierte cada punto en estadísticas de juego y telemetría avanzada.
+      <h1 id="landing-title" className="display landing-hero__title">El partido, leído golpe a golpe.</h1>
+      <div className="landing-hero__row">
+        <p className="landing-hero__lede">
+          Sube un vídeo de tenis. NetPoint localiza a los jugadores, la bola y la pista, marca cada bote y cada
+          golpe, y un coach te explica qué pasó y qué entrenar.
         </p>
         <div className="landing-hero__actions">
-          <button type="button" className="landing-cta" onClick={onStart}>
-            Iniciar análisis
-            <ArrowRight size={18} aria-hidden="true" />
+          <button type="button" className="btn btn--primary btn--lg" onClick={onStart}>
+            Analizar un vídeo
           </button>
-          <a className="landing-cta landing-cta--ghost" href="#landing-quick-start">
-            <PlayCircle size={18} aria-hidden="true" />
-            Explorar demo
+          <a className="btn btn--secondary btn--lg" href="#landing-quick-start">
+            Probar una demo
           </a>
         </div>
-        <dl className="landing-metrics">
-          {heroMetrics.map((metric) => (
-            <div key={metric.label}>
-              <dt>{metric.label}</dt>
-              <dd>{metric.value}</dd>
-            </div>
-          ))}
-        </dl>
       </div>
-      <div className="landing-hero__visual">
-        <div className="landing-hero__glow" aria-hidden="true" />
-        <CourtIllustration />
+      <div className="landing-hero__court">
+        <CourtScene />
       </div>
     </section>
   )

@@ -10,12 +10,12 @@ const minimumColumns = 120
 const messageIntervalMilliseconds = 2600
 
 const statusMessages = [
-  'Detectando líneas de pista...',
-  'Calibrando cámara con solvePnP...',
-  'Detectando jugadores con YOLOv8...',
-  'Rastreando trayectoria de pelota...',
-  'Detectando botes y golpes...',
-  'Reconstruyendo física 3D...',
+  'Detectando líneas de pista…',
+  'Calibrando cámara con solvePnP…',
+  'Detectando jugadores con YOLOv8…',
+  'Rastreando trayectoria de pelota…',
+  'Detectando botes y golpes…',
+  'Reconstruyendo física 3D…',
 ]
 
 /** Canvas drawn on a low-resolution pixel grid and upscaled by an integer factor, so it stays crisp at any width. */
@@ -85,7 +85,7 @@ export function RetroTennisLoader({ progress }: RetroTennisLoaderProps) {
 
   return (
     <div className="retro-loader">
-      <span className="eyebrow retro-loader__eyebrow">ANALIZANDO PARTIDO</span>
+      <h2 className="retro-loader__title">Analizando el partido</h2>
       <div className="retro-loader__screen">
         <PixelCourt />
       </div>

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ChartNoAxesCombined, Gauge, ListOrdered } from 'lucide-react'
+import { ChartNoAxesCombined } from 'lucide-react'
 
 import { formatSpeed, formatTime } from '../../lib/format.ts'
 import { calculateMatchStatistics } from '../../lib/matchStatistics.ts'
@@ -29,8 +29,8 @@ export function MatchStatsPanel({ telemetry, currentTime, playerNames, view }: M
   if (!telemetry || !statistics) {
     return (
       <div className="match-stats__empty">
-        <ChartNoAxesCombined size={24} strokeWidth={1.5} />
-        <span>Analiza un partido para ver sus estadísticas</span>
+        <ChartNoAxesCombined size={22} strokeWidth={1.5} aria-hidden="true" />
+        <span>Analiza un partido para ver sus estadísticas.</span>
       </div>
     )
   }
@@ -38,20 +38,20 @@ export function MatchStatsPanel({ telemetry, currentTime, playerNames, view }: M
   if (view === 'shots') {
     return (
       <div className="match-stats">
-        <div className="match-stats__coverage">
-          <div className="match-stats__coverage-heading">
-            <h3><Gauge size={16} /> Golpes por jugador</h3>
+        <section className="match-stats__section">
+          <div className="match-stats__section-heading">
+            <h3>Golpes por jugador</h3>
             <span>{statistics.shots.match.pointCount.toLocaleString('es-ES')} puntos</span>
           </div>
           <ShotTable summary={statistics.shots} playerLabel={playerLabel} />
-        </div>
-        <div className="match-stats__coverage">
-          <div className="match-stats__coverage-heading">
-            <h3><ListOrdered size={16} /> Registro de golpes</h3>
-            <span>{statistics.shots.match.measuredShots}/{statistics.shots.match.totalShots} con velocidad</span>
+        </section>
+        <section className="match-stats__section">
+          <div className="match-stats__section-heading">
+            <h3>Registro de golpes</h3>
+            <span>{statistics.shots.match.measuredShots} de {statistics.shots.match.totalShots} con velocidad</span>
           </div>
           <ShotLog hits={telemetry.events.hits} currentTime={currentTime} playerLabel={playerLabel} />
-        </div>
+        </section>
       </div>
     )
   }
@@ -59,45 +59,45 @@ export function MatchStatsPanel({ telemetry, currentTime, playerNames, view }: M
   return (
     <div className="match-stats">
       <div className="match-stats__summary">
-        <div className="match-stats__metric">
-          <span className="match-stats__metric-label">Duración</span>
-          <strong className="match-stats__metric-value">{formatTime(statistics.coverage.durationSeconds)}</strong>
+        <div className="figure">
+          <strong className="figure__value">{formatTime(statistics.coverage.durationSeconds)}</strong>
+          <span className="figure__label">Duración</span>
         </div>
-        <div className="match-stats__metric">
-          <span className="match-stats__metric-label">Botes</span>
-          <strong className="match-stats__metric-value">{telemetry.events.bounces.length.toLocaleString('es-ES')}</strong>
+        <div className="figure">
+          <strong className="figure__value">{telemetry.events.bounces.length.toLocaleString('es-ES')}</strong>
+          <span className="figure__label">Botes</span>
         </div>
-        <div className="match-stats__metric">
+        <div className="figure">
+          <strong className="figure__value">{statistics.shots.match.totalShots.toLocaleString('es-ES')}</strong>
           <span
-            className="match-stats__metric-label"
+            className="figure__label"
             title="Estimación por cambios de trayectoria cerca de un jugador; no confirma el contacto con la raqueta."
           >
             Golpes estimados
           </span>
-          <strong className="match-stats__metric-value">{statistics.shots.match.totalShots.toLocaleString('es-ES')}</strong>
         </div>
-        <div className="match-stats__metric">
+        <div className="figure">
+          <strong className="figure__value">{formatSpeed(statistics.shots.match.maxSpeedKmh)}</strong>
           <span
-            className="match-stats__metric-label"
+            className="figure__label"
             title="Estimada con el ajuste 3D de la trayectoria cuando es posible; si no, con la proyección de la pelota sobre la pista, que puede sobrestimar golpes altos."
           >
-            Vel. máxima
+            Velocidad máxima
           </span>
-          <strong className="match-stats__metric-value">{formatSpeed(statistics.shots.match.maxSpeedKmh)}</strong>
         </div>
       </div>
-      <div className="match-stats__coverage">
-        <div className="match-stats__coverage-heading">
-          <h3><ChartNoAxesCombined size={16} /> Cobertura</h3>
-          <span>frames detectados</span>
+      <section className="match-stats__section">
+        <div className="match-stats__section-heading">
+          <h3>Cobertura de detección</h3>
+          <span>fotogramas detectados</span>
         </div>
         <CoverageRow label={playerLabel('far')} detectedFrames={statistics.coverage.farPlayerFrames}
-          totalFrames={statistics.coverage.frameCount} kind="player" />
+          totalFrames={statistics.coverage.frameCount} kind="far" />
         <CoverageRow label={playerLabel('near')} detectedFrames={statistics.coverage.nearPlayerFrames}
-          totalFrames={statistics.coverage.frameCount} kind="player" />
+          totalFrames={statistics.coverage.frameCount} kind="near" />
         <CoverageRow label="Pelota" detectedFrames={statistics.coverage.ballFrames}
           totalFrames={statistics.coverage.frameCount} kind="ball" />
-      </div>
+      </section>
     </div>
   )
 }

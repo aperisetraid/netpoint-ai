@@ -1,3 +1,4 @@
+import { courtPalette, sideColors, withAlpha } from '../../../lib/palette.ts'
 import type { BounceEvent } from '../../../services/api'
 import { applyHomography, type Homography } from './geometry.ts'
 
@@ -8,7 +9,6 @@ const markRadiusMeters = 0.16
 const rippleStartRadiusMeters = 0.2
 const rippleEndRadiusMeters = 1.5
 const ringSegments = 40
-const sideColors: Record<BounceEvent['side'], string> = { far: '56, 200, 232', near: '255, 173, 68' }
 
 function traceCourtCircle(
   context: CanvasRenderingContext2D,
@@ -54,7 +54,7 @@ export function drawBounce(
       bounce,
       rippleStartRadiusMeters + (rippleEndRadiusMeters - rippleStartRadiusMeters) * eased,
     )
-    context.strokeStyle = `rgba(${color}, ${0.9 * (1 - progress)})`
+    context.strokeStyle = withAlpha(color, 0.9 * (1 - progress))
     context.lineWidth = (3.5 - 2 * progress) * unit
     context.stroke()
   }
@@ -62,9 +62,9 @@ export function drawBounce(
   const markOpacity = Math.min(1, age / 0.08) * Math.min(1, (bounceMarkSeconds - age) / 1.5)
   const impact = age < 0.25 ? 1 + 0.8 * (1 - age / 0.25) : 1
   traceCourtCircle(context, courtToImage, bounce, markRadiusMeters * impact)
-  context.fillStyle = `rgba(${color}, ${0.85 * markOpacity})`
+  context.fillStyle = withAlpha(color, 0.85 * markOpacity)
   context.fill()
-  context.strokeStyle = `rgba(244, 248, 242, ${0.9 * markOpacity})`
+  context.strokeStyle = withAlpha(courtPalette.line, 0.9 * markOpacity)
   context.lineWidth = 1.5 * unit
   context.stroke()
 }

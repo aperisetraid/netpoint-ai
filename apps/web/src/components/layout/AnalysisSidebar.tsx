@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { ChartNoAxesCombined, Crosshair, ScanSearch } from 'lucide-react'
 
 import type { AnalysisResult } from '../../hooks/useMatchAnalysis'
 import type { BounceEvent, FrameTelemetry, MatchTelemetry } from '../../services/api'
@@ -20,13 +19,13 @@ interface AnalysisSidebarProps {
   playerNames: PlayerNames
 }
 
-const tabs: { id: SidebarTab; label: string; icon: typeof Crosshair }[] = [
-  { id: 'summary', label: 'Resumen', icon: ChartNoAxesCombined },
-  { id: 'shots', label: 'Golpes', icon: Crosshair },
-  { id: 'frame', label: 'Fotograma', icon: ScanSearch },
+const tabs: { id: SidebarTab; label: string }[] = [
+  { id: 'summary', label: 'Resumen' },
+  { id: 'shots', label: 'Golpes' },
+  { id: 'frame', label: 'Fotograma' },
 ]
 
-/** Tactical side panel: 2D mini-map on top, tabbed statistics below. */
+/** Tactical side panel: 2D court map on top, tabbed statistics below. */
 export function AnalysisSidebar({
   analysis, telemetry, frame, bounces, currentTime, isPlaying, playerNames,
 }: AnalysisSidebarProps) {
@@ -36,9 +35,9 @@ export function AnalysisSidebar({
     <aside className="sidebar" aria-label="Panel táctico">
       <CourtMap hasAnalysis={analysis !== null} frame={frame} bounces={bounces} playerNames={playerNames} />
 
-      <section className="sidebar__stats" aria-label="Estadísticas del partido">
+      <section className="sidebar__stats panel" aria-label="Estadísticas del partido">
         <div className="tabs" role="tablist" aria-label="Vista de datos">
-          {tabs.map(({ id, label, icon: Icon }) => (
+          {tabs.map(({ id, label }) => (
             <button
               key={id}
               type="button"
@@ -48,7 +47,7 @@ export function AnalysisSidebar({
               aria-controls={`tabpanel-${id}`}
               onClick={() => setTab(id)}
             >
-              <Icon size={14} aria-hidden="true" /> {label}
+              {label}
             </button>
           ))}
         </div>

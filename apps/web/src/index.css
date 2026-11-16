@@ -1,39 +1,4 @@
 @import "tailwindcss";
-
-:root {
-  color-scheme: dark;
-  --color-bg: #0c1110;
-  --color-foreground: #edf2e8;
-  --color-panel: #1b2620;
-  --color-border: rgba(225, 239, 223, 0.11);
-  font-family: 'Aptos', 'Segoe UI', sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html {
-  background: var(--color-bg);
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  background: var(--color-bg);
-  color: var(--color-foreground);
-}
-
-body,
-button,
-input {
-  font-family: inherit;
-}
-
-#root {
-  min-height: 100vh;
-}
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+@import "./styles/primitives.css";

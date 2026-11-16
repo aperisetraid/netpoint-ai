@@ -1,0 +1,126 @@
+/* NetPoint design tokens — "night session on a hard court".
+   Components only ever read these custom properties; the theme switch swaps the values.
+   The theme lives on <html data-theme> (set by App), so the dialog backdrop and the page
+   overscroll follow it too. Dark is the identity; light is the day session. */
+
+@theme {
+  --font-sans: 'Archivo Variable', 'Archivo', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #0a1424;
+  --surface: #101d33;
+  --surface-2: #16263f;
+  --surface-float: #13223a;
+  --stage: #050b15;
+
+  /* Ink */
+  --text: #eef2f6;
+  --text-2: #8c9ab0;
+  --rule: rgb(238 242 246 / 0.12);
+  --rule-strong: rgb(238 242 246 / 0.24);
+
+  /* Court (identical in both themes: the court is always the court) */
+  --court: #1e4e8c;
+  --court-outer: #163a6a;
+  --court-line: #eef2f6;
+  /* Marks drawn on the court or over video: bright in both themes (mirrors lib/palette.ts). */
+  --mark-ball: #dcf04a;
+  --mark-far: #5cc8f2;
+  --mark-near: #f58a4b;
+
+  /* Actions */
+  --primary-bg: #eef2f6;
+  --primary-fg: #0a1424;
+  --primary-hover: #ffffff;
+  --hover-wash: rgb(238 242 246 / 0.07);
+  --focus: #eef2f6;
+
+  /* Data on UI surfaces: colour follows the entity (see lib/palette.ts for the court/video steps) */
+  --data-ball: #dcf04a;
+  --data-far: #5cc8f2;
+  --data-near: #f58a4b;
+
+  /* Status (always paired with an icon or words) */
+  --danger: #ff7b7b;
+  --danger-wash: rgb(255 123 123 / 0.1);
+  --warning: #f5c26b;
+  --warning-wash: rgb(245 194 107 / 0.1);
+  --success: #6fd6a8;
+
+  /* Type */
+  --font-sans: 'Archivo Variable', 'Archivo', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-15: 15px;
+  --fs-18: 18px;
+  --fs-22: 22px;
+  --fs-28: 28px;
+  --fs-40: 40px;
+  --fs-64: clamp(40px, 6vw, 64px);
+  --fs-hero: clamp(56px, 10.5vw, 152px);
+  /* Archivo's width axis: expanded for display, semi-condensed for labels. */
+  --wide: 125%;
+  --semi-wide: 112%;
+  --narrow: 87.5%;
+
+  /* Space (4px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-12: 48px;
+  --s-18: 72px;
+  --s-30: 120px;
+
+  /* Radius encodes hierarchy: controls < panels < stage/dialog; pills only for status and time. */
+  --r-control: 4px;
+  --r-panel: 10px;
+  --r-stage: 16px;
+  --r-pill: 999px;
+
+  /* Elevation: flat with rules; one shadow, for floating layers only. */
+  --shadow-float: 0 24px 64px -24px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(238 242 246 / 0.06);
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f1f4f8;
+  --surface: #ffffff;
+  --surface-2: #e8edf3;
+  --surface-float: #ffffff;
+
+  --text: #0e1b2e;
+  --text-2: #56657a;
+  --rule: rgb(14 27 46 / 0.12);
+  --rule-strong: rgb(14 27 46 / 0.24);
+
+  --primary-bg: #1e4e8c;
+  --primary-fg: #ffffff;
+  --primary-hover: #173f73;
+  --hover-wash: rgb(14 27 46 / 0.05);
+  --focus: #1e4e8c;
+
+  --data-ball: #9aad12;
+  --data-far: #1e8fc8;
+  --data-near: #d9662b;
+
+  --danger: #c23b3b;
+  --danger-wash: rgb(194 59 59 / 0.08);
+  --warning: #946000;
+  --warning-wash: rgb(148 96 0 / 0.08);
+  --success: #1b7a50;
+
+  --shadow-float: 0 24px 56px -24px rgb(14 27 46 / 0.32), 0 0 0 1px rgb(14 27 46 / 0.06);
+}

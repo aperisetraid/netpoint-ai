@@ -1,7 +1,9 @@
 import type { AnalysisRequest } from '../../hooks/useMatchAnalysis'
-import { type Theme, ThemeToggle } from '../layout/ThemeToggle'
+import { AppNav } from '../layout/AppNav'
+import type { Theme } from '../layout/ThemeToggle'
 import { FeatureGrid } from './FeatureGrid'
 import { HeroSection } from './HeroSection'
+import { HowItWorks } from './HowItWorks'
 import { QuickStart } from './QuickStart'
 import './Landing.css'
 
@@ -19,27 +21,27 @@ interface LandingViewProps {
 export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLibrary }: LandingViewProps) {
   return (
     <div className="landing">
-      <header className="landing-nav">
-        <span className="landing-nav__brand">
-          NETPOINT <strong>AI</strong>
-        </span>
-        <nav className="landing-nav__links" aria-label="Secciones">
-          <a href="#landing-features">Características</a>
-          <a href="#landing-quick-start">Demo</a>
-          <button type="button" onClick={onLibrary}>Biblioteca</button>
-        </nav>
-        <ThemeToggle theme={theme} onThemeChange={onThemeChange} />
-      </header>
+      <AppNav
+        theme={theme}
+        onThemeChange={onThemeChange}
+        links={(
+          <>
+            <a href="#como-funciona">Cómo funciona</a>
+            <a href="#landing-quick-start">Demo</a>
+            <button type="button" onClick={onLibrary}>Biblioteca</button>
+          </>
+        )}
+        actions={<button type="button" className="btn btn--primary" onClick={onStart}>Analizar un vídeo</button>}
+      />
 
       <HeroSection onStart={onStart} />
-      <div id="landing-features">
-        <FeatureGrid />
-      </div>
+      <HowItWorks />
+      <FeatureGrid />
       <QuickStart onSelect={onSelectVideo} />
 
       <footer className="landing-footer">
-        <span>NetPoint AI · Trabajo Fin de Máster</span>
-        <span>React · Fastify · YOLOv8 · OpenCV</span>
+        <span>NetPoint AI. Trabajo Fin de Máster.</span>
+        <a href="#landing-title">Volver arriba</a>
       </footer>
     </div>
   )

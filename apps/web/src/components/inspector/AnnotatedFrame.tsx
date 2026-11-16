@@ -6,6 +6,8 @@ import { type FrameTelemetry, getMatchFrameUrl } from '../../services/api'
 
 export type InspectionLayer = 'court' | 'player' | 'ball'
 
+const courtHalfMeters = 23.77 / 2
+
 interface AnnotatedFrameProps {
   matchId: string
   frame: FrameTelemetry
@@ -26,7 +28,7 @@ export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers
       <img
         key={imageUrl}
         src={imageUrl}
-        alt={`Fotograma ${frame.frame_index} del video analizado`}
+        alt={`Fotograma ${frame.frame_index} del vídeo analizado`}
         onLoad={() => setImageState('ready')}
         onError={() => setImageState('error')}
         style={{ visibility: imageState === 'ready' ? 'visible' : 'hidden' }}
@@ -49,8 +51,12 @@ export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers
             const labelY = Math.max(labelSize * 1.3, top)
             const labelWidth = label.length * labelSize * 0.6
             const labelX = Math.max(0, Math.min(left, imageWidth - labelWidth))
+            // Players take the colour of their side, as on the court map; unknown positions stay neutral.
+            const side = detection.class === 'player' && typeof detection.x_meters === 'number'
+              ? ` frame-overlay__player--${detection.x_meters < courtHalfMeters ? 'far' : 'near'}`
+              : ''
             return (
-              <g key={`${detection.class}-${index}`} className={`frame-overlay__${detection.class}`}>
+              <g key={`${detection.class}-${index}`} className={`frame-overlay__${detection.class}${side}`}>
                 <rect x={left} y={top} width={Math.max(0, right - left)} height={Math.max(0, bottom - top)}
                   className={estimated ? 'frame-overlay__carried' : undefined} />
                 <rect className="frame-overlay__label-bg" x={labelX} y={labelY - labelSize * 1.3} width={labelWidth} height={labelSize * 1.3} />
@@ -62,7 +68,7 @@ export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers
       ) : (
         <div className="frame-inspector__placeholder" role="status">
           {imageState === 'loading' ? <RefreshCw size={20} className="animate-spin" /> : <AlertTriangle size={20} />}
-          <span>{imageState === 'loading' ? 'Cargando fotograma...' : 'Fotograma no disponible. Vuelve a analizar el video si reiniciaste el servicio.'}</span>
+          <span>{imageState === 'loading' ? 'Cargando fotograma…' : 'Fotograma no disponible. Vuelve a analizar el vídeo si reiniciaste el servicio.'}</span>
           {imageState === 'error' ? (
             <button className="icon-button" type="button" title="Reintentar carga" aria-label="Reintentar carga"
               onClick={() => { setImageState('loading'); setRetry(retry + 1) }}>

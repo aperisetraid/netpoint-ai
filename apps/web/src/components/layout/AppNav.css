@@ -1,0 +1,78 @@
+/* The single top bar shared by landing, library and workspace. */
+
+.app-nav {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: var(--s-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+.app-nav__brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font-size: var(--fs-18);
+  font-stretch: var(--wide);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+button.app-nav__brand:hover span { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 5px; }
+
+.app-nav__mark { width: 26px; height: 26px; }
+.app-nav__mark rect { fill: var(--court); }
+.app-nav__mark path { fill: none; stroke: var(--court-line); stroke-width: 1.6; }
+.app-nav__mark circle { fill: var(--mark-ball); stroke: var(--stage); stroke-width: 1.2; }
+
+.app-nav__spacer { flex: 1; }
+
+.app-nav__context {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+  border-left: 1px solid var(--rule);
+  padding-left: var(--s-4);
+}
+
+.app-nav__links { display: flex; align-items: center; gap: 2px; }
+
+.app-nav__links > a,
+.app-nav__links > button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  padding: 0 10px;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.app-nav__links > a:hover,
+.app-nav__links > button:hover { color: var(--text); }
+.app-nav__links > [aria-current='page'] { color: var(--text); font-weight: 650; cursor: default; }
+
+.app-nav__actions { display: flex; flex: none; align-items: center; gap: var(--s-2); }
+
+@media (max-width: 760px) {
+  .app-nav__links > a { display: none; }
+}
+
+@media (max-width: 560px) {
+  .app-nav { gap: var(--s-2); }
+  .app-nav__brand span { display: none; }
+  .app-nav__context { padding-left: var(--s-3); }
+}

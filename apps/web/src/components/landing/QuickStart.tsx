@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { AlertTriangle, FileVideo, LoaderCircle, Play, UploadCloud } from 'lucide-react'
+import { AlertTriangle, LoaderCircle, Play, UploadCloud } from 'lucide-react'
 
 import type { AnalysisRequest } from '../../hooks/useMatchAnalysis'
 import { validateVideoFile, videoAcceptAttribute } from '../../lib/videoFile'
@@ -47,10 +47,7 @@ export function QuickStart({ onSelect }: QuickStartProps) {
 
   return (
     <section className="landing-section" id="landing-quick-start" aria-labelledby="landing-quick-title">
-      <div className="landing-section__heading">
-        <span className="eyebrow">ACCESO RÁPIDO</span>
-        <h2 id="landing-quick-title">Empieza con tu vídeo o con un partido de prueba</h2>
-      </div>
+      <h2 id="landing-quick-title" className="display landing-section__title">Empieza aquí</h2>
 
       <div className="landing-quick">
         <div
@@ -75,51 +72,46 @@ export function QuickStart({ onSelect }: QuickStartProps) {
               event.currentTarget.value = ''
             }}
           />
-          <span className="landing-dropzone__icon">
-            <UploadCloud size={28} aria-hidden="true" />
-          </span>
-          <strong>Arrastra tu vídeo aquí</strong>
-          <span>MP4, M4V, MOV, AVI, MKV o WebM · máx. 1 GB</span>
-          <button type="button" className="landing-cta landing-cta--small" onClick={() => fileInputRef.current?.click()}>
-            Seleccionar archivo
+          <UploadCloud size={32} strokeWidth={1.4} aria-hidden="true" />
+          <strong className="heading">Arrastra tu vídeo aquí</strong>
+          <span>MP4, M4V, MOV, AVI, MKV o WebM, hasta 1 GB</span>
+          <button type="button" className="btn btn--primary" onClick={() => fileInputRef.current?.click()}>
+            Elegir un archivo
           </button>
         </div>
 
-        <ul className="landing-demos" aria-label="Partidos de prueba">
-          {demoMatches.map((demo) => {
-            const isLoading = loadingDemoId === demo.id
-            return (
-              <li key={demo.id}>
-                <button
-                  type="button"
-                  className="landing-demo"
-                  disabled={loadingDemoId !== null}
-                  onClick={() => void loadDemo(demo)}
-                >
-                  <span className="landing-demo__icon">
-                    <FileVideo size={22} aria-hidden="true" />
-                  </span>
-                  <span className="landing-demo__text">
-                    <strong>{demo.title}</strong>
-                    <span>{demo.description}</span>
-                  </span>
-                  <span className="landing-demo__action">
-                    {isLoading ? (
-                      <LoaderCircle size={18} className="animate-spin" aria-label="Cargando" />
-                    ) : (
-                      <Play size={18} aria-hidden="true" />
-                    )}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+        <div className="landing-demos">
+          <h3 className="heading">O prueba con un partido de ejemplo</h3>
+          <ul aria-label="Partidos de ejemplo">
+            {demoMatches.map((demo) => {
+              const isLoading = loadingDemoId === demo.id
+              return (
+                <li key={demo.id}>
+                  <button
+                    type="button"
+                    className="landing-demo"
+                    disabled={loadingDemoId !== null}
+                    aria-busy={isLoading}
+                    onClick={() => void loadDemo(demo)}
+                  >
+                    <span className="landing-demo__text">
+                      <strong>{demo.title}</strong>
+                      <span>{demo.description}</span>
+                    </span>
+                    <span className="landing-demo__action" aria-hidden="true">
+                      {isLoading ? <LoaderCircle size={18} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
       </div>
 
       {errorMessage ? (
         <div className="notice notice--error landing-quick__error" role="alert">
-          <AlertTriangle size={18} />
+          <AlertTriangle size={16} aria-hidden="true" />
           <span>{errorMessage}</span>
         </div>
       ) : null}

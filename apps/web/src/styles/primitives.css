@@ -1,0 +1,241 @@
+/* Shared building blocks. Feature stylesheets compose these instead of restyling their own. */
+
+/* ---------- Type roles ---------- */
+
+.display {
+  margin: 0;
+  font-stretch: var(--wide);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+}
+
+.heading {
+  margin: 0;
+  font-stretch: var(--semi-wide);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+/* Small sentence-case label that names a value or a group; never decorative. */
+.label {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-stretch: var(--narrow);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  background: transparent;
+  padding: 0 var(--s-4);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.btn:disabled { opacity: 0.4; }
+.btn svg { flex: none; }
+
+.btn--primary { background: var(--primary-bg); color: var(--primary-fg); }
+.btn--primary:hover:not(:disabled) { background: var(--primary-hover); }
+
+.btn--secondary { border-color: var(--rule-strong); }
+.btn--secondary:hover:not(:disabled),
+.btn--secondary[aria-pressed='true'],
+.btn--secondary[aria-expanded='true'] { border-color: var(--text); background: var(--hover-wash); }
+
+.btn--ghost { color: var(--text-2); }
+.btn--ghost:hover:not(:disabled),
+.btn--ghost[aria-pressed='true'],
+.btn--ghost[aria-current='page'] { background: var(--hover-wash); color: var(--text); }
+
+.btn--icon { width: 36px; padding: 0; }
+.btn--sm { min-height: 30px; padding: 0 var(--s-3); font-size: var(--fs-12); }
+.btn--sm.btn--icon { width: 30px; }
+.btn--lg { min-height: 52px; padding: 0 var(--s-6); font-size: var(--fs-15); }
+.btn--block { width: 100%; }
+
+/* ---------- Form fields ---------- */
+
+.field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.field__control {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-control);
+  background: var(--bg);
+  padding: 0 var(--s-3);
+  color: var(--text);
+  font-size: var(--fs-13);
+  transition: border-color 150ms ease;
+}
+
+.field__control::placeholder { color: var(--text-2); }
+.field__control:hover { border-color: var(--text-2); }
+.field__control:focus-visible { border-color: var(--focus); outline-offset: 0; }
+
+/* ---------- Segmented control (mutually exclusive options) ---------- */
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--r-control) + 3px);
+  padding: 2px;
+}
+
+.segmented > button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  padding: 0 var(--s-3);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-weight: 650;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.segmented > button:hover:not(:disabled) { color: var(--text); }
+.segmented > button[aria-pressed='true'],
+.segmented > button[aria-checked='true'] { background: var(--primary-bg); color: var(--primary-fg); }
+.segmented > button:disabled { opacity: 0.4; }
+
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: var(--s-4);
+  border-bottom: 1px solid var(--rule);
+  padding: 0 var(--s-4);
+}
+
+.tabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: var(--s-3) 0 10px;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  font-weight: 650;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.tabs > button:hover { color: var(--text); }
+.tabs > button[aria-selected='true'] { border-bottom-color: var(--text); color: var(--text); }
+.tabs > button:focus-visible { outline-offset: -2px; }
+
+/* ---------- Timecode chip (a moment in the video) ---------- */
+
+.timecode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  padding: 0 8px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+button.timecode { background: transparent; transition: background-color 140ms ease, color 140ms ease; }
+button.timecode:hover { background: var(--primary-bg); border-color: var(--primary-bg); color: var(--primary-fg); }
+
+/* ---------- Entity swatch (player or ball) ---------- */
+
+.swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.swatch--far { color: var(--data-far); }
+.swatch--near { color: var(--data-near); }
+.swatch--ball { color: var(--data-ball); }
+
+/* ---------- Figure: one number that matters, with what it measures underneath ---------- */
+
+.figure { display: grid; align-content: start; gap: 2px; min-width: 0; }
+
+.figure__value {
+  font-size: clamp(22px, 6vw, var(--fs-28));
+  font-stretch: var(--wide);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.figure__label {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Notice ---------- */
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-control);
+  padding: 10px var(--s-3);
+  font-size: var(--fs-13);
+  line-height: 1.45;
+}
+
+.notice svg { flex: none; margin-top: 1px; }
+.notice > div { display: grid; gap: 2px; }
+.notice--error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-wash); color: var(--text); }
+.notice--error svg,
+.notice--error strong { color: var(--danger); }
+.notice--warning { border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: var(--warning-wash); }
+.notice--warning svg { color: var(--warning); }
+.notice--success svg { color: var(--success); }
+
+/* ---------- Panel ---------- */
+
+.panel {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+}

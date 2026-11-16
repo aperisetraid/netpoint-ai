@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Activity, Clock, Film, Gauge, Loader2, Play, Target } from 'lucide-react'
+import { Film, Loader2, Play } from 'lucide-react'
 
 import { formatDuration, formatRelativeDate } from '../../lib/libraryFilter.ts'
 import { type LibraryMatch, getLibraryThumbnailUrl } from '../../services/api'
@@ -12,13 +12,16 @@ interface MatchCardProps {
   onOpen: (matchId: string) => void
 }
 
+const sourceLabels = { url: 'Enlace', upload: 'Archivo' } as const
+
 /** One stored analysis; the whole card is the button that loads it into the workspace. */
-export function MatchCard({ match, index, isOpening, disabled, onOpen }: MatchCardProps) {
+export function MatchCard({ match, isOpening, disabled, onOpen }: MatchCardProps) {
   const [thumbnailFailed, setThumbnailFailed] = useState(false)
   const showThumbnail = match.hasVideo && !thumbnailFailed
+  const source = sourceLabels[match.source as keyof typeof sourceLabels] ?? 'Análisis'
 
   return (
-    <li className="match-card-item" style={{ '--card-index': Math.min(index, 12) } as React.CSSProperties}>
+    <li className="match-card-item">
       <button
         type="button"
         className="match-card"
@@ -38,14 +41,12 @@ export function MatchCard({ match, index, isOpening, disabled, onOpen }: MatchCa
             />
           ) : (
             <span className="match-card__fallback" aria-hidden="true">
-              <Film size={30} strokeWidth={1.4} />
+              <Film size={28} strokeWidth={1.4} />
             </span>
           )}
-          <span className="match-card__duration">
-            <Clock size={11} aria-hidden="true" /> {formatDuration(match.durationSeconds)}
-          </span>
+          <span className="match-card__duration">{formatDuration(match.durationSeconds)}</span>
           <span className="match-card__play" aria-hidden="true">
-            {isOpening ? <Loader2 size={22} className="animate-spin" /> : <Play size={22} fill="currentColor" />}
+            {isOpening ? <Loader2 size={20} className="animate-spin" /> : <Play size={20} fill="currentColor" />}
           </span>
         </span>
 
@@ -53,16 +54,21 @@ export function MatchCard({ match, index, isOpening, disabled, onOpen }: MatchCa
           <span className="match-card__title" title={match.title}>{match.title}</span>
           <span className="match-card__meta">
             <time dateTime={match.createdAt}>{formatRelativeDate(match.createdAt)}</time>
-            <span aria-hidden="true">·</span>
-            <span>{match.source === 'url' ? 'Enlace' : match.source === 'upload' ? 'Archivo' : 'Análisis'}</span>
-            {match.width && match.height ? <><span aria-hidden="true">·</span><span>{match.height}p</span></> : null}
+            {', '}{source.toLowerCase()}
+            {match.width && match.height ? `, ${match.height}p` : null}
           </span>
           <span className="match-card__stats">
-            <span title="Golpes estimados"><Target size={13} aria-hidden="true" /> {match.hitCount} golpes</span>
-            <span title="Botes detectados"><Activity size={13} aria-hidden="true" /> {match.bounceCount} botes</span>
-            <span title="Velocidad máxima estimada">
-              <Gauge size={13} aria-hidden="true" />
-              {match.maxSpeedKmh === null ? '--' : `${Math.round(match.maxSpeedKmh)} km/h`}
+            <span className="figure" title="Golpes estimados">
+              <strong className="figure__value">{match.hitCount}</strong>
+              <span className="figure__label">golpes</span>
+            </span>
+            <span className="figure" title="Botes detectados">
+              <strong className="figure__value">{match.bounceCount}</strong>
+              <span className="figure__label">botes</span>
+            </span>
+            <span className="figure" title="Velocidad máxima estimada">
+              <strong className="figure__value">{match.maxSpeedKmh === null ? '—' : Math.round(match.maxSpeedKmh)}</strong>
+              <span className="figure__label">km/h máx.</span>
             </span>
           </span>
         </span>

@@ -2,7 +2,8 @@ interface CoverageRowProps {
   label: string
   detectedFrames: number
   totalFrames: number
-  kind: 'player' | 'ball'
+  /** Which entity the row measures; it picks the swatch and bar colour. */
+  kind: 'far' | 'near' | 'ball'
 }
 
 export function CoverageRow({ label, detectedFrames, totalFrames, kind }: CoverageRowProps) {
@@ -10,7 +11,10 @@ export function CoverageRow({ label, detectedFrames, totalFrames, kind }: Covera
 
   return (
     <div className="match-stats__coverage-row">
-      <span className="match-stats__coverage-label" title={label}>{label}</span>
+      <span className="match-stats__coverage-label" title={label}>
+        <i className={`swatch swatch--${kind}`} aria-hidden="true" />
+        <span>{label}</span>
+      </span>
       <div
         className={`match-stats__bar match-stats__bar--${kind}`}
         role="progressbar"

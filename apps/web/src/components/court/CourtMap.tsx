@@ -52,9 +52,9 @@ function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps,
         const pointY = (clamp(bounce.x_meters, -outMarginMeters, courtLength + outMarginMeters) / courtLength) * 2377
         return (
           <g key={`${bounce.timestamp_seconds}-${index}`} className={`court-bounce court-bounce--${bounce.side}`}>
-            <circle cx={pointX} cy={pointY} r="62" className="court-bounce__marker" />
-            <text x={pointX} y={pointY + 13} textAnchor="middle" className="court-bounce__label"
-              style={{ fontSize: `${Math.min(54, 140 / String(index + 1).length)}px` }}>{index + 1}</text>
+            <circle cx={pointX} cy={pointY} r="88" className="court-bounce__marker" />
+            <text x={pointX} y={pointY} dy="0.35em" textAnchor="middle" className="court-bounce__label"
+              style={{ fontSize: `${Math.min(96, 170 / String(index + 1).length)}px` }}>{index + 1}</text>
           </g>
         )
       })}
@@ -64,13 +64,13 @@ function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps,
         const playerY = clamp(detection.y_meters ?? 0, 0, courtWidth)
         const pointX = (playerY / courtWidth) * 1097
         const pointY = (playerX / courtLength) * 2377
-        const playerName = playerX < courtLength / 2 ? playerNames.far : playerNames.near
-        const markerLabel = Array.from(playerName.trim())[0]?.toLocaleUpperCase('es-ES') ?? '?'
+        const side = playerX < courtLength / 2 ? 'far' : 'near'
+        const markerLabel = Array.from(playerNames[side].trim())[0]?.toLocaleUpperCase('es-ES') ?? (side === 'far' ? 'F' : 'C')
 
         return (
           <g key={`${frame?.frame_index}-${index}`}>
-            <circle cx={pointX} cy={pointY} r="46" className="court-marker court-marker--player" />
-            <text x={pointX} y={pointY + 7} textAnchor="middle" className="court-marker-label">
+            <circle cx={pointX} cy={pointY} r="84" className={`court-marker court-marker--${side}`} />
+            <text x={pointX} y={pointY} dy="0.35em" textAnchor="middle" className="court-marker-label">
               {markerLabel}
             </text>
           </g>
@@ -83,28 +83,34 @@ function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps,
 /** Top-down court with the players of the current frame and the bounces played so far. */
 export function CourtMap({ hasAnalysis, frame, bounces, playerNames }: CourtMapProps) {
   return (
-    <section className="court-card" aria-label="Mini-mapa de pista">
+    <section className="court-card panel" aria-labelledby="court-card-title">
       <div className="court-card__heading">
-        <span className="eyebrow">MINI-MAPA 2D</span>
+        <h2 id="court-card-title" className="court-card__title">Pista</h2>
         <span className="panel-timestamp">
-          {frame ? `#${frame.frame_index} · ${formatTime(frame.timestamp_seconds)}` : '--'}
+          {frame ? (
+            <>Fotograma <span className="mono">{frame.frame_index}</span>, <span className="mono">{formatTime(frame.timestamp_seconds)}</span></>
+          ) : '—'}
         </span>
       </div>
       <div className="court-map-stage">
         {hasAnalysis ? (
           <>
             <CourtVisualization frame={frame} bounces={bounces} playerNames={playerNames} />
-            <ul className="court-legend" aria-label="Leyenda">
-              <li><i className="map-legend__dot map-legend__dot--player" /> Jugadores</li>
-              <li><i className="map-legend__dot court-legend__dot--far" /> Botes (fondo)</li>
-              <li><i className="map-legend__dot court-legend__dot--near" /> Botes (cámara)</li>
-              <li className="court-legend__count">{bounces.length} botes</li>
-            </ul>
+            <div className="court-legend">
+              <ul aria-label="Leyenda">
+                <li><i className="swatch swatch--far" aria-hidden="true" /> {playerNames.far || 'Fondo'}</li>
+                <li><i className="swatch swatch--near" aria-hidden="true" /> {playerNames.near || 'Cámara'}</li>
+              </ul>
+              <p className="court-legend__count">
+                <strong>{bounces.length}</strong> {bounces.length === 1 ? 'bote' : 'botes'}
+              </p>
+              <p className="court-legend__note">Numerados por orden, del color del campo donde caen.</p>
+            </div>
           </>
         ) : (
           <div className="court-map-empty">
-            <Radar size={22} />
-            <span>El mapa aparecerá al procesar un partido</span>
+            <Radar size={22} strokeWidth={1.5} aria-hidden="true" />
+            <span>El mapa aparecerá al analizar un partido.</span>
           </div>
         )}
       </div>

@@ -49,17 +49,19 @@ export function PlayerNamesDialog({ open, onCancel, onConfirm }: PlayerNamesDial
     >
       <form className="player-dialog__form" onSubmit={handleSubmit}>
         <div className="player-dialog__header">
-          <div className="player-dialog__mark" aria-hidden="true">NP</div>
-          <button className="player-dialog__close" type="button" aria-label="Cerrar" title="Cerrar" onClick={onCancel}>
-            <X size={18} />
+          <h2 id="player-dialog-title">¿Quién juega en cada lado?</h2>
+          <button className="btn btn--ghost btn--icon" type="button" aria-label="Cerrar" title="Cerrar" onClick={onCancel}>
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
-        <span className="eyebrow">IDENTIFICACIÓN DE JUGADORES</span>
-        <h2 id="player-dialog-title">¿Quién juega cada lado?</h2>
-        <p className="player-dialog__description">Sus iniciales aparecerán en el mapa de pista.</p>
+        <p className="player-dialog__description">Cada jugador tendrá su color y su inicial en el mapa de pista.</p>
         <label className="player-dialog__field">
-          <span><b>F</b> Fondo <small>Lado opuesto a la cámara</small></span>
+          <span>
+            <b className="player-dialog__badge player-dialog__badge--far" aria-hidden="true">F</b>
+            Fondo <small>Lado opuesto a la cámara</small>
+          </span>
           <input
+            className="field__control"
             autoFocus
             required
             maxLength={80}
@@ -71,8 +73,12 @@ export function PlayerNamesDialog({ open, onCancel, onConfirm }: PlayerNamesDial
           />
         </label>
         <label className="player-dialog__field">
-          <span><b>C</b> Cámara <small>Lado más cercano</small></span>
+          <span>
+            <b className="player-dialog__badge player-dialog__badge--near" aria-hidden="true">C</b>
+            Cámara <small>Lado más cercano</small>
+          </span>
           <input
+            className="field__control"
             required
             maxLength={80}
             type="text"
@@ -84,11 +90,11 @@ export function PlayerNamesDialog({ open, onCancel, onConfirm }: PlayerNamesDial
         </label>
         {error ? <p className="player-dialog__error" role="alert">{error}</p> : null}
         <div className="player-dialog__actions">
-          <button className="player-dialog__cancel" type="button" onClick={onCancel}>
+          <button className="btn btn--ghost" type="button" onClick={onCancel}>
             Ahora no
           </button>
-          <button className="player-dialog__confirm" type="submit">
-            Guardar y analizar <Video size={16} />
+          <button className="btn btn--primary" type="submit">
+            <Video size={16} aria-hidden="true" /> Guardar y analizar
           </button>
         </div>
       </form>

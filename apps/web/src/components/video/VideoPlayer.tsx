@@ -67,8 +67,8 @@ export function VideoPlayer({ ref, sourceUrl, telemetry, onTimeChange, onPlaybac
           </>
         ) : (
           <div className="video-player__empty">
-            <Video className="h-8 w-8 text-lime-300" />
-            <span>El reproductor se habilita al procesar un video</span>
+            <Video size={28} strokeWidth={1.4} aria-hidden="true" />
+            <span>Aquí verás el partido con la trayectoria, los botes y los golpes encima.</span>
             {onRequestSource ? (
               <button type="button" className="video-player__cta" onClick={onRequestSource}>
                 Cargar un vídeo
@@ -78,7 +78,7 @@ export function VideoPlayer({ ref, sourceUrl, telemetry, onTimeChange, onPlaybac
         )}
         {sourceUrl && failedUrl === sourceUrl ? (
           <p className="video-player__error">
-            No se pudo reproducir el video. Comprueba que el servicio de visión sigue activo y que el formato es compatible con el navegador.
+            No se pudo reproducir el vídeo. Comprueba que el servicio de visión sigue activo y que el navegador admite el formato.
           </p>
         ) : null}
       </div>

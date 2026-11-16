@@ -1,17 +1,13 @@
 import { formatSpeed } from '../../../lib/format.ts'
 import { shotTypeLabels } from '../../../lib/shotSummary.ts'
+import { courtPalette, sideColors, withAlpha } from '../../../lib/palette.ts'
 import type { FrameTelemetry, HitEvent } from '../../../services/api'
 
 export const hitLabelSeconds = 1.3
 const fadeInSeconds = 0.12
 const fadeOutSeconds = 0.35
 const courtLengthMeters = 23.77
-const typeColors: Record<HitEvent['type'], string> = {
-  serve: '#fbbf24',
-  volley: '#38bdf8',
-  forehand: '#bef264',
-  backhand: '#f472b6',
-}
+const labelFont = "'Archivo Variable', 'Archivo', system-ui, sans-serif"
 
 /** Top-centre of the box of the player on the hitter's side, in image pixels. */
 export function hitAnchor(frame: FrameTelemetry | undefined, hit: HitEvent): [number, number] | null {
@@ -27,7 +23,8 @@ export function hitAnchor(frame: FrameTelemetry | undefined, hit: HitEvent): [nu
   return anchor
 }
 
-/** Draws a floating card above `anchor` with the shot type and speed, `age` seconds after the hit. */
+/** Draws a floating card above `anchor` with the shot type and speed, `age` seconds after the hit.
+ *  The card wears the hitter's colour (as on the court map); the type is always spelled out. */
 export function drawHitLabel(
   context: CanvasRenderingContext2D,
   hit: HitEvent,
@@ -48,12 +45,13 @@ export function drawHitLabel(
   const dot = 7 * unit
   const height = 26 * unit
 
+  const accent = sideColors[hit.player]
   context.save()
   context.globalAlpha = opacity
   context.textBaseline = 'middle'
-  context.font = `700 ${fontSize}px system-ui, sans-serif`
+  context.font = `700 ${fontSize}px ${labelFont}`
   const typeWidth = context.measureText(typeText).width
-  context.font = `600 ${fontSize}px system-ui, sans-serif`
+  context.font = `500 ${fontSize}px ${labelFont}`
   const speedWidth = speedText ? context.measureText(speedText).width + gap : 0
   const width = paddingX * 2 + dot + gap * 0.75 + typeWidth + speedWidth
 
@@ -63,9 +61,9 @@ export function drawHitLabel(
 
   context.beginPath()
   context.roundRect(left, top, width, height, height / 2)
-  context.fillStyle = 'rgba(9, 14, 11, 0.86)'
+  context.fillStyle = withAlpha(courtPalette.stage, 0.86)
   context.fill()
-  context.strokeStyle = typeColors[hit.type]
+  context.strokeStyle = accent
   context.lineWidth = 1.5 * unit
   context.stroke()
 
@@ -77,17 +75,17 @@ export function drawHitLabel(
 
   context.beginPath()
   context.arc(left + paddingX + dot / 2, middle, dot / 2, 0, Math.PI * 2)
-  context.fillStyle = typeColors[hit.type]
+  context.fillStyle = accent
   context.fill()
 
   let textX = left + paddingX + dot + gap * 0.75
-  context.font = `700 ${fontSize}px system-ui, sans-serif`
-  context.fillStyle = '#f4f8f2'
+  context.font = `700 ${fontSize}px ${labelFont}`
+  context.fillStyle = courtPalette.line
   context.fillText(typeText, textX, middle)
   if (speedText) {
     textX += typeWidth + gap
-    context.font = `600 ${fontSize}px system-ui, sans-serif`
-    context.fillStyle = typeColors[hit.type]
+    context.font = `500 ${fontSize}px ${labelFont}`
+    context.fillStyle = withAlpha(courtPalette.line, 0.72)
     context.fillText(speedText, textX, middle)
   }
   context.restore()

@@ -13,14 +13,14 @@ export interface DemoMatch {
 export const demoMatches: DemoMatch[] = [
   {
     id: 'test-1',
-    title: 'Test 1',
+    title: 'Intercambio desde el fondo',
     description: 'Intercambio de fondo con saque y botes en pista.',
     fileName: 'Test 1 - Trim.mp4',
     url: test1Url,
   },
   {
     id: 'test-2',
-    title: 'Test 2',
+    title: 'Juego con cambios de dirección',
     description: 'Secuencia de juego con golpes y cambios de dirección.',
     fileName: 'Test 2 - Trim.mp4',
     url: test2Url,

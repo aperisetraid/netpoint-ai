@@ -46,32 +46,30 @@ export function IngestPanel({ isSubmitting, errorMessage, isCompleted, onSubmit 
   }
 
   return (
-    <section className="ingest-panel" aria-label="Iniciar análisis">
+    <section className="ingest-panel" aria-labelledby="ingest-title">
       <div className="ingest-panel__heading">
-        <div>
-          <span className="eyebrow">FUENTE</span>
-          <h2>Nuevo análisis</h2>
-        </div>
-        <div className="source-toggle" role="group" aria-label="Origen del video">
+        <h2 id="ingest-title">Nuevo análisis</h2>
+        <div className="segmented" role="group" aria-label="Origen del vídeo">
           <button type="button" aria-pressed={inputMode === 'url'} onClick={() => setInputMode('url')}>
-            <Link2 size={16} /> URL
+            <Link2 size={14} aria-hidden="true" /> Enlace
           </button>
           <button type="button" aria-pressed={inputMode === 'file'} onClick={() => setInputMode('file')}>
-            <Upload size={16} /> Archivo
+            <Upload size={14} aria-hidden="true" /> Archivo
           </button>
         </div>
       </div>
 
-      <form className={`ingest-form ingest-form--${inputMode}`} onSubmit={handleSubmit} noValidate>
+      <form className="ingest-form" onSubmit={handleSubmit} noValidate>
         {inputMode === 'url' ? (
           <label className="field">
-            <span>URL del video</span>
+            <span>Enlace al vídeo (YouTube o directo)</span>
             <input
+              className="field__control"
               type="url"
               required
               value={sourceUrl}
               onChange={(event) => setSourceUrl(event.target.value)}
-              placeholder="https://..."
+              placeholder="https://…"
             />
           </label>
         ) : (
@@ -81,45 +79,46 @@ export function IngestPanel({ isSubmitting, errorMessage, isCompleted, onSubmit 
               className="sr-only"
               type="file"
               accept={videoAcceptAttribute}
-              aria-label="Seleccionar archivo de video"
+              aria-label="Seleccionar archivo de vídeo"
               onChange={handleFileChange}
             />
-            <span className="field-label">Archivo de video</span>
+            <span className="field-label">Archivo de vídeo</span>
             <button className="file-picker" type="button" onClick={() => fileInputRef.current?.click()}>
-              <Upload size={17} />
-              {selectedVideo ? 'Cambiar archivo' : 'Seleccionar video'}
+              <Upload size={16} aria-hidden="true" />
+              {selectedVideo ? 'Cambiar archivo' : 'Elegir vídeo'}
             </button>
             <span className="file-meta">
               {selectedVideo
                 ? `${selectedVideo.name} · ${(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB`
-                : 'MP4, M4V, MOV, AVI, MKV o WebM · máx. 1 GB'}
+                : 'MP4, M4V, MOV, AVI, MKV o WebM, hasta 1 GB'}
             </span>
           </div>
         )}
 
-        <label className="field field--title">
-          <span>Título</span>
+        <label className="field">
+          <span>Título (opcional)</span>
           <input
+            className="field__control"
             type="text"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Final ATP · Set 1"
+            placeholder="Final del torneo, set 1"
           />
         </label>
 
         <button
-          className="analyze-button"
+          className="btn btn--primary"
           type="submit"
           disabled={isSubmitting || (inputMode === 'url' ? sourceUrl.trim().length === 0 : !selectedVideo)}
         >
-          {isSubmitting ? <RefreshCw size={17} className="animate-spin" /> : <Video size={17} />}
+          {isSubmitting ? <RefreshCw size={16} className="animate-spin" aria-hidden="true" /> : <Video size={16} aria-hidden="true" />}
           {isSubmitting ? 'Analizando' : 'Analizar'}
         </button>
       </form>
 
       {visibleError ? (
         <div className="notice notice--error" role="alert">
-          <AlertTriangle size={18} />
+          <AlertTriangle size={16} aria-hidden="true" />
           <div>
             <strong>No se pudo completar el análisis</strong>
             <span>{visibleError}</span>
@@ -129,8 +128,8 @@ export function IngestPanel({ isSubmitting, errorMessage, isCompleted, onSubmit 
 
       {isCompleted ? (
         <div className="notice notice--success" role="status">
-          <CheckCircle2 size={18} />
-          <strong>Procesamiento completado</strong>
+          <CheckCircle2 size={16} aria-hidden="true" />
+          <strong>Análisis completado</strong>
         </div>
       ) : null}
     </section>

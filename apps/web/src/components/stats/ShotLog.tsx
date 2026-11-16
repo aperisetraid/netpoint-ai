@@ -11,15 +11,18 @@ interface ShotLogProps {
 /** Chronological list of hits; the ones already played are marked as past. */
 export function ShotLog({ hits, currentTime, playerLabel }: ShotLogProps) {
   if (!hits.length) {
-    return <p className="shot-log__empty">No se detectaron golpes en este video.</p>
+    return <p className="shot-log__empty">No se detectaron golpes en este vídeo.</p>
   }
   return (
     <ol className="shot-log">
       {hits.map((hit) => (
         <li key={`${hit.frame_index}-${hit.player}`} className={hit.timestamp_seconds <= currentTime ? 'is-past' : undefined}>
           <span className="shot-log__time">{formatTime(hit.timestamp_seconds)}</span>
-          <span className={`shot-log__type shot-log__type--${hit.type}`}>{shotTypeLabels[hit.type]}</span>
-          <span className="shot-log__player" title={playerLabel(hit.player)}>{playerLabel(hit.player)}</span>
+          <span className="shot-log__type">{shotTypeLabels[hit.type]}</span>
+          <span className="shot-log__player" title={playerLabel(hit.player)}>
+            <i className={`swatch swatch--${hit.player}`} aria-hidden="true" />
+            <span>{playerLabel(hit.player)}</span>
+          </span>
           <strong>{formatSpeed(hit.speed_kmh)}</strong>
         </li>
       ))}

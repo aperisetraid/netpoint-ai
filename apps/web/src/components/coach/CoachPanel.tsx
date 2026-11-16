@@ -1,5 +1,6 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   ArrowUp,
   ChevronRight,
   KeyRound,
@@ -127,44 +128,41 @@ export function CoachPanel({ matchId, playerNames, currentTime, hasVideo, onSeek
   return (
     <aside className="coach" aria-label="Coach táctico">
       <header className="coach__header">
-        <div className="coach__identity">
-          <span className="coach__mark" aria-hidden="true"><Sparkles size={15} /></span>
-          <div>
-            <span className="coach__eyebrow">Coach táctico</span>
-            <h2>NetPoint Coach</h2>
-          </div>
-        </div>
+        <h2>Coach táctico</h2>
         <div className="coach__actions">
           <button
             type="button"
-            className="coach__icon-button"
+            className="btn btn--ghost btn--icon btn--sm"
             title="Nueva conversación"
             aria-label="Nueva conversación"
             disabled={!messages.length || isStreaming}
             onClick={() => void chat.reset()}
           >
-            <RotateCcw size={15} />
+            <RotateCcw size={15} aria-hidden="true" />
           </button>
-          <button type="button" className="coach__icon-button" title="Volver al panel táctico" aria-label="Cerrar coach" onClick={onClose}>
-            <X size={16} />
+          <button type="button" className="btn btn--ghost btn--icon btn--sm" title="Volver al panel táctico" aria-label="Cerrar coach" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      <div className="coach__perspective" role="radiogroup" aria-label="¿Quién pregunta?">
-        <span>Hablas como</span>
-        {perspectiveOptions.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            role="radio"
-            aria-checked={perspective === id}
-            disabled={!matchId}
-            onClick={() => choosePerspective(id)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="coach__perspective">
+        <span id="coach-perspective-label">Hablas como</span>
+        <div className="segmented" role="radiogroup" aria-labelledby="coach-perspective-label">
+          {perspectiveOptions.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={perspective === id}
+              disabled={!matchId}
+              title={label}
+              onClick={() => choosePerspective(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div
@@ -204,7 +202,7 @@ export function CoachPanel({ matchId, playerNames, currentTime, hasVideo, onSeek
           />
           <button
             type="submit"
-            className="coach__send"
+            className="btn btn--primary coach__send"
             data-mode={isStreaming ? 'stop' : 'send'}
             aria-label={isStreaming ? 'Detener respuesta' : 'Enviar pregunta'}
             title={isStreaming ? 'Detener' : 'Enviar (Intro)'}
@@ -215,8 +213,7 @@ export function CoachPanel({ matchId, playerNames, currentTime, hasVideo, onSeek
         </div>
         {matchId && hasVideo ? (
           <p className="coach__hint">
-            <Play size={9} fill="currentColor" aria-hidden="true" />
-            El coach ve el vídeo en <b>{clock(currentTime)}</b> · «este punto» se refiere a ese momento
+            El coach ve el vídeo en <b>{clock(currentTime)}</b>. «Este punto» se refiere a ese momento.
           </p>
         ) : null}
       </form>
@@ -241,7 +238,7 @@ function CoachBody({ matchId, session, isLoading, loadError, messages, draft, ca
   if (!matchId) {
     return (
       <div className="coach-empty">
-        <Video size={22} strokeWidth={1.6} />
+        <Video size={22} strokeWidth={1.5} aria-hidden="true" />
         <p>Carga o abre un partido para conversar con el coach.</p>
       </div>
     )
@@ -254,14 +251,19 @@ function CoachBody({ matchId, session, isLoading, loadError, messages, draft, ca
     )
   }
   if (loadError) {
-    return <p className="coach-notice coach-notice--error" role="alert">{loadError}</p>
+    return (
+      <div className="notice notice--error coach-notice" role="alert">
+        <AlertTriangle size={15} aria-hidden="true" />
+        <p>{loadError}</p>
+      </div>
+    )
   }
   if (!session) return null
 
   return (
     <>
       {!session.available ? (
-        <div className="coach-notice">
+        <div className="notice notice--warning coach-notice">
           <KeyRound size={15} aria-hidden="true" />
           <p>
             Para activar el coach, define <code>ANTHROPIC_API_KEY</code> en el entorno del servicio de visión y
@@ -353,7 +355,7 @@ function CoachIntro({ session, canAsk, onAsk, onSeek }: CoachIntroProps) {
               <span className="coach-highlight__label">{highlight.label}</span>
               <strong>{highlight.value}</strong>
               <span className="coach-highlight__detail">{highlight.detail}</span>
-              <span className="coach-highlight__time">
+              <span className="timecode">
                 <Play size={8} fill="currentColor" aria-hidden="true" /> {clock(highlight.time)}
               </span>
             </button>
@@ -361,7 +363,7 @@ function CoachIntro({ session, canAsk, onAsk, onSeek }: CoachIntroProps) {
         </div>
       ) : null}
 
-      <button type="button" className="coach-report" disabled={!canAsk} onClick={() => onAsk(session.reportPrompt)}>
+      <button type="button" className="btn btn--primary btn--block coach-report" disabled={!canAsk} onClick={() => onAsk(session.reportPrompt)}>
         <Sparkles size={16} aria-hidden="true" />
         <span>
           <b>Informe táctico del partido</b>

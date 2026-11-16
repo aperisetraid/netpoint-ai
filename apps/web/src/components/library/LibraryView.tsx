@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, FolderOpen, Plus, RefreshCw, Search } from 'lucide-react'
+import { AlertTriangle, FolderOpen, Plus, RefreshCw, Search } from 'lucide-react'
 
 import { type LibrarySort, filterLibrary, librarySortLabels } from '../../lib/libraryFilter.ts'
 import { ApiError, type LibraryMatch, listLibraryMatches } from '../../services/api'
-import { type Theme, ThemeToggle } from '../layout/ThemeToggle'
+import { AppNav } from '../layout/AppNav'
+import type { Theme } from '../layout/ThemeToggle'
 import { MatchCard } from './MatchCard'
 import './Library.css'
 
@@ -73,32 +74,33 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
 
   return (
     <div className="library">
-      <header className="library-nav">
-        <button type="button" className="library-nav__brand" onClick={onHome} title="Volver al inicio">
-          NETPOINT <strong>AI</strong>
-        </button>
-        <nav className="library-nav__tabs" aria-label="Secciones">
-          <button type="button" onClick={onWorkspace}>Análisis</button>
-          <button type="button" aria-current="page">Biblioteca</button>
-        </nav>
-        <ThemeToggle theme={theme} onThemeChange={onThemeChange} />
-      </header>
+      <AppNav
+        theme={theme}
+        onThemeChange={onThemeChange}
+        onHome={onHome}
+        links={(
+          <>
+            <button type="button" onClick={onWorkspace}>Análisis</button>
+            <button type="button" aria-current="page">Biblioteca</button>
+          </>
+        )}
+        actions={(
+          <button type="button" className="btn btn--primary" onClick={onWorkspace}>
+            <Plus size={15} aria-hidden="true" /> Nuevo análisis
+          </button>
+        )}
+      />
 
       <section className="library-head" aria-labelledby="library-title">
-        <div>
-          <span className="eyebrow">HISTORIAL</span>
-          <h1 id="library-title">Biblioteca de partidos</h1>
-          <p>Abre un análisis guardado al instante: la telemetría y el vídeo ya están procesados.</p>
-        </div>
-        <button type="button" className="library-action" onClick={onWorkspace}>
-          <Plus size={16} aria-hidden="true" /> Nuevo análisis
-        </button>
+        <h1 id="library-title" className="display">Biblioteca</h1>
+        <p>Los partidos que ya analizaste. Ábrelos al instante, sin volver a procesar el vídeo.</p>
       </section>
 
       <div className="library-toolbar">
         <label className="library-search">
           <Search size={16} aria-hidden="true" />
           <input
+            className="field__control"
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -107,8 +109,8 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
           />
         </label>
         <label className="library-sort">
-          <span>Ordenar</span>
-          <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
+          <span>Ordenar por</span>
+          <select className="field__control" value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
             {(Object.keys(librarySortLabels) as LibrarySort[]).map((key) => (
               <option key={key} value={key}>{librarySortLabels[key]}</option>
             ))}
@@ -120,15 +122,15 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
       </div>
 
       {openError ? (
-        <div className="library-notice" role="alert">
-          <AlertTriangle size={17} aria-hidden="true" /> {openError}
+        <div className="notice notice--error library-notice" role="alert">
+          <AlertTriangle size={16} aria-hidden="true" /> <span>{openError}</span>
         </div>
       ) : null}
 
       {state === 'loading' ? (
         <ul className="library-grid" aria-busy="true" aria-label="Cargando partidos">
           {Array.from({ length: 6 }, (_, index) => (
-            <li key={index} className="match-skeleton" style={{ '--card-index': index } as React.CSSProperties}>
+            <li key={index} className="match-skeleton">
               <span /><span /><span />
             </li>
           ))}
@@ -140,7 +142,7 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
           <AlertTriangle size={30} strokeWidth={1.4} aria-hidden="true" />
           <h2>No se pudo cargar la biblioteca</h2>
           <p>{loadError}</p>
-          <button type="button" className="library-action" onClick={retry}>
+          <button type="button" className="btn btn--secondary" onClick={retry}>
             <RefreshCw size={15} aria-hidden="true" /> Reintentar
           </button>
         </div>
@@ -150,9 +152,9 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
         <div className="library-empty">
           <FolderOpen size={32} strokeWidth={1.4} aria-hidden="true" />
           <h2>Aún no hay partidos analizados</h2>
-          <p>Cuando analices un vídeo aparecerá aquí para que puedas reabrirlo sin recalcularlo.</p>
-          <button type="button" className="library-action" onClick={onWorkspace}>
-            Analizar un vídeo <ArrowRight size={15} aria-hidden="true" />
+          <p>Cuando analices un vídeo aparecerá aquí, listo para reabrirlo sin volver a procesarlo.</p>
+          <button type="button" className="btn btn--primary" onClick={onWorkspace}>
+            Analizar un vídeo
           </button>
         </div>
       ) : null}
@@ -162,7 +164,7 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
           <Search size={30} strokeWidth={1.4} aria-hidden="true" />
           <h2>Sin resultados</h2>
           <p>Ningún partido coincide con «{query.trim()}».</p>
-          <button type="button" className="library-action" onClick={() => setQuery('')}>Limpiar búsqueda</button>
+          <button type="button" className="btn btn--secondary" onClick={() => setQuery('')}>Limpiar búsqueda</button>
         </div>
       ) : null}
 

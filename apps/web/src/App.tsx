@@ -34,6 +34,8 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem('netpoint-theme', theme)
+    // Tokens live on <html>, so the page background and the dialog backdrop follow the theme too.
+    document.documentElement.dataset.theme = theme
   }, [theme])
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Radar, Video } from 'lucide-react'
+import { Video } from 'lucide-react'
 
 import type { AnalysisResult } from '../../hooks/useMatchAnalysis'
 import { formatTime } from '../../lib/format.ts'
@@ -23,8 +23,12 @@ export function FrameInspector({ analysis, frame, isPlaying }: FrameInspectorPro
   return (
     <section className="frame-inspector" aria-label="Inspección del fotograma">
       <div className="frame-inspector__heading">
-        <h3><Radar size={18} /> Fotograma actual</h3>
-        <span>{frame ? `#${frame.frame_index} · ${formatTime(frame.timestamp_seconds)}` : 'Sin fotograma'}</span>
+        <h3>Fotograma actual</h3>
+        <span>
+          {frame ? (
+            <>N.º <span className="mono">{frame.frame_index}</span>, <span className="mono">{formatTime(frame.timestamp_seconds)}</span></>
+          ) : 'Sin fotograma'}
+        </span>
       </div>
       <div className="frame-inspector__layers" role="group" aria-label="Capas de detección">
         {([
@@ -47,14 +51,20 @@ export function FrameInspector({ analysis, frame, isPlaying }: FrameInspectorPro
         />
       ) : (
         <div className="frame-inspector__empty" role="status">
-          <Video size={24} />
-          <span>{!analysis ? 'Sin video analizado' : isPlaying ? 'Video en reproducción' : !frame ? 'Sin fotograma analizado en esta posición' : 'Este análisis no incluye imágenes. Vuelve a analizar el video.'}</span>
+          <Video size={22} strokeWidth={1.5} aria-hidden="true" />
+          <span>
+            {!analysis
+              ? 'Sin vídeo analizado.'
+              : isPlaying
+                ? 'Pausa el vídeo para inspeccionar el fotograma.'
+                : !frame
+                  ? 'No hay fotograma analizado en esta posición.'
+                  : 'Este análisis no incluye imágenes. Vuelve a analizar el vídeo.'}
+          </span>
         </div>
       )}
-      {analysis && frame && !isPlaying ? (
-        <div className="frame-inspector__status">
-          {frame.detections.some((detection) => detection.carried_forward || detection.interpolated) ? <span>Posiciones previas o estimadas en línea discontinua</span> : null}
-        </div>
+      {analysis && frame && !isPlaying && frame.detections.some((detection) => detection.carried_forward || detection.interpolated) ? (
+        <p className="frame-inspector__status">Las posiciones previas o estimadas van en línea discontinua.</p>
       ) : null}
     </section>
   )

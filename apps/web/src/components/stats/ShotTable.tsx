@@ -24,7 +24,12 @@ export function ShotTable({ summary, playerLabel }: ShotTableProps) {
             const player = summary.byPlayer[side]
             return (
               <tr key={side}>
-                <th scope="row" title={playerLabel(side)}>{playerLabel(side)}</th>
+                <th scope="row" title={playerLabel(side)}>
+                  <span className="shot-table__player">
+                    <i className={`swatch swatch--${side}`} aria-hidden="true" />
+                    {playerLabel(side)}
+                  </span>
+                </th>
                 {shotTypes.map(([type]) => <td key={type}>{player.byType[type]}</td>)}
                 <td>{formatSpeed(player.maxSpeedKmh)}</td>
                 <td>{formatSpeed(player.averageSpeedKmh)}</td>

@@ -1,24 +1,27 @@
+import { courtPalette, withAlpha } from '../../lib/palette.ts'
 import { ballAt, createGeometry, hitFlashAt, playerAt, type RallyGeometry, type Side } from './rally'
 
+// Same hard court, ball and player colours as the court map and the video overlay.
 const palette = {
-  background: '#0c1110',
-  surface: '#17221c',
-  stripe: '#1b2620',
-  line: 'rgba(225, 239, 223, 0.6)',
-  net: '#edf2e8',
-  lime: '#bef264',
-  limeDark: '#7fa844',
-  racket: '#c9e795',
-  ball: '#38bdf8',
-  ballHighlight: '#e0f2fe',
-  skin: '#d9c39a',
-  hair: '#26352b',
-  shadow: 'rgba(0, 0, 0, 0.38)',
+  background: courtPalette.courtOuter,
+  surface: courtPalette.court,
+  stripe: '#22558F',
+  line: withAlpha(courtPalette.line, 0.7),
+  net: courtPalette.line,
+  hitFlash: courtPalette.line,
+  grip: '#0E1B2E',
+  racket: courtPalette.line,
+  ball: courtPalette.ball,
+  ballHighlight: '#F8FCDD',
+  skin: '#D9B99A',
+  hair: '#0E1B2E',
+  shadow: 'rgba(5, 11, 21, 0.45)',
 }
 
+// The left player is drawn as the far side and the right one as the camera side.
 const playerColors: Record<Side, { shirt: string; shorts: string }> = {
-  left: { shirt: '#bef264', shorts: '#2d4a2a' },
-  right: { shirt: '#d7e5cf', shorts: '#3d5a3c' },
+  left: { shirt: courtPalette.far, shorts: '#0E1B2E' },
+  right: { shirt: courtPalette.near, shorts: '#0E1B2E' },
 }
 
 const sprite = [
@@ -95,7 +98,7 @@ function drawPlayer(ctx: CanvasRenderingContext2D, geometry: RallyGeometry, side
   const place = (offsetX: number, offsetY: number, width: number, height: number) => {
     ctx.fillRect(direction > 0 ? x + offsetX : x - offsetX - width + 1, y + offsetY, width, height)
   }
-  ctx.fillStyle = palette.limeDark
+  ctx.fillStyle = palette.grip
   if (swing < 0.5) {
     place(4, -1, 1, 3)
     ctx.fillStyle = palette.racket
@@ -138,7 +141,7 @@ function drawHitFlash(ctx: CanvasRenderingContext2D, geometry: RallyGeometry, ti
   const distance = 2 + Math.round(flash.age * 18)
   const x = Math.round(flash.x)
   const y = Math.round(flash.y)
-  ctx.fillStyle = palette.lime
+  ctx.fillStyle = palette.hitFlash
   ctx.fillRect(x - distance, y, 1, 1)
   ctx.fillRect(x + distance, y, 1, 1)
   ctx.fillRect(x, y - distance, 1, 1)

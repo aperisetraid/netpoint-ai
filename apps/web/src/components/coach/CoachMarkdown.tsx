@@ -35,7 +35,7 @@ function renderInline(nodes: Inline[], onSeek: (seconds: number) => void, prefix
           <button
             key={key}
             type="button"
-            className="coach-time"
+            className="timecode coach-time"
             title={`Ver ${node.label} en el vídeo`}
             onClick={() => onSeek(node.seconds)}
           >

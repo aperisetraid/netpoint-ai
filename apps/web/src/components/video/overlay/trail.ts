@@ -1,4 +1,5 @@
 import { findIndexAtOrBefore } from '../../../lib/frameLookup.ts'
+import { courtPalette, withAlpha } from '../../../lib/palette.ts'
 import type { FrameTelemetry } from '../../../services/api'
 
 export interface BallTrack {
@@ -96,7 +97,7 @@ export function drawTrail(context: CanvasRenderingContext2D, points: TrailPoint[
   ]
   const stroke = (age: number) => {
     const freshness = 1 - Math.min(1, age / trailSeconds)
-    context.strokeStyle = `rgba(190, 242, 100, ${0.08 + 0.8 * freshness * freshness})`
+    context.strokeStyle = withAlpha(courtPalette.ball, 0.08 + 0.8 * freshness * freshness)
     context.lineWidth = (1.5 + 4.5 * freshness) * unit
     context.stroke()
   }
@@ -122,10 +123,10 @@ export function drawTrail(context: CanvasRenderingContext2D, points: TrailPoint[
   const headFreshness = 1 - Math.min(1, head.age / trailSeconds)
   context.beginPath()
   context.arc(head.x, head.y, 9 * unit, 0, Math.PI * 2)
-  context.fillStyle = `rgba(190, 242, 100, ${0.22 * headFreshness})`
+  context.fillStyle = withAlpha(courtPalette.ball, 0.22 * headFreshness)
   context.fill()
   context.beginPath()
   context.arc(head.x, head.y, 4 * unit, 0, Math.PI * 2)
-  context.fillStyle = `rgba(247, 254, 231, ${0.95 * headFreshness})`
+  context.fillStyle = withAlpha('#F8FCDD', 0.95 * headFreshness)
   context.fill()
 }
