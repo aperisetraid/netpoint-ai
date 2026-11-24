@@ -5,7 +5,8 @@ import numpy as np
 
 from ball_tracking import track_ball
 from events import build_events
-from events_test import IMAGE_SIZE, SyntheticRally
+from events_test import IMAGE_SIZE, SyntheticRally, broadcast_camera, court_corners
+from homography import COURT_LENGTH_METERS
 from trajectory import best_ball
 
 
@@ -145,6 +146,43 @@ class BallTrackingTests(unittest.TestCase):
             frame["detections"].append(player_at(index))
         track_ball(frames, [[candidate(*flight_path(index))] for index in range(30)], WIDTH)
         self.assertGreater(len(balls(frames)), 20)
+
+    def test_follows_the_serve_toss_rather_than_the_racket_hugging_the_server(self):
+        server = {"class": "player", "confidence": 0.9, "bbox": [600, 300, 660, 420], "x_meters": 1.0, "y_meters": 4.0}
+        frames = make_frames(30)
+        for frame in frames:
+            frame["detections"].append(dict(server))
+
+        def toss(index):
+            step = index - 5
+            return 640, 280 - 6 * step + 0.25 * step * step
+
+        # The racket head drifts slowly along the edge of the server's box all along, while
+        # the ball rises and falls well above their head.
+        candidates = [
+            [candidate(595, 410 - 1.5 * index, confidence=0.9)]
+            + ([candidate(*toss(index), confidence=0.9)] if 5 <= index < 25 else [])
+            for index in range(30)
+        ]
+        track_ball(frames, candidates, WIDTH)
+
+        found = balls(frames)
+        self.assertTrue(found)
+        for index, ball in found.items():
+            self.assertLess(math.dist(center(ball), toss(index)), 4, index)
+
+    def test_rejects_a_track_that_only_the_motion_detector_sees_along_the_net(self):
+        camera = broadcast_camera()
+        corners = court_corners(camera)
+        width, height = IMAGE_SIZE
+
+        def along_net(index):
+            return camera.project((COURT_LENGTH_METERS / 2, -0.5 + 0.4 * index, 0.6))
+
+        for source, expected in (("motion", 0), ("color", 30)):
+            frames = make_frames(30, corners)
+            track_ball(frames, [[candidate(*along_net(index), source, 0.9)] for index in range(30)], width, height)
+            self.assertEqual(len(balls(frames)), expected, source)
 
     def test_interpolates_frames_where_the_ball_is_not_seen(self):
         frames = make_frames(24)

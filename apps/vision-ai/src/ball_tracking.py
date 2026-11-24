@@ -19,7 +19,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from homography import get_homography_matrix, transform_point
+from camera import estimate_camera
+from homography import COURT_LENGTH_METERS, COURT_WIDTH_METERS, get_homography_matrix, transform_point
 from trajectory import MAX_BALL_IMAGE_SPEED_WIDTHS_PER_SECOND
 
 
@@ -55,6 +56,20 @@ PLAYER_ATTACHED_MAX_RELATIVE_TRAVEL = 0.5
 # edges of the body), so a tracklet next to a player that only that detector supports is not
 # trusted; the real ball there is also seen by the colour or YOLO detectors.
 UNCORROBORATED_SOURCES = {"motion"}
+# The racket head is a bright, ball-sized blob that hugs the outline of the player's box and
+# drifts with them, as during a serve toss, when the ball itself is a faint dot well above. A
+# tracklet glued to a box edge in most of its frames and slow relative to the player is part of
+# them; the ball touches the racket for a frame or two and otherwise flies past much faster.
+PLAYER_CLING_MAX_HEIGHTS = 0.12
+PLAYER_CLING_MAX_RELATIVE_SPEED_RATIO = 0.2
+PLAYER_CLING_MIN_END_RUN = 2
+# The net mesh sways and makes the frame-difference detector fire along it, which chains into a
+# slow track running along the net. The ball crosses the net in a few frames, so a track that
+# only that detector sees and that stays on the net in most of its frames is the net itself.
+NET_POST_OUTSIDE_SINGLES_METERS = 0.914
+NET_POST_HEIGHT_METERS = 1.07
+NET_BAND_MARGIN_PIXELS = 4.0
+NET_TRACK_MIN_FRACTION = 0.8
 SOURCE_WEIGHTS = {"yolo": 1.0, "yolo_court": 1.0, "color": 0.6, "motion": 0.5}
 
 # Gaps between two tracklets are bridged when both sides agree on where the ball went.
@@ -153,9 +168,71 @@ class _Stabilizer:
     by a homography that the court corners give for every scene point, not only the ground.
     """
 
-    def __init__(self, frames: Sequence[dict]):
+    def __init__(self, frames: Sequence[dict], image_height: float | None = None, image_width: float | None = None):
         self.frames = frames
         self.cache: dict[tuple, np.ndarray | None] = {}
+        self.image_size = (
+            (int(image_width), int(image_height)) if image_width and image_height else None
+        )
+        self.net_cache: dict[tuple, np.ndarray | None] = {}
+
+    def net_band(self, position: int) -> np.ndarray | None:
+        """Image outline of the net, from the ground up to the top of its posts."""
+        corners = self.frames[position].get("court_corners")
+        if not corners or self.image_size is None:
+            return None
+        key = tuple(tuple(corner) for corner in corners)
+        if key not in self.net_cache:
+            camera = estimate_camera(key, self.image_size)
+            outline = None
+            if camera is not None:
+                x = COURT_LENGTH_METERS / 2
+                near_side, far_side = -NET_POST_OUTSIDE_SINGLES_METERS, COURT_WIDTH_METERS + NET_POST_OUTSIDE_SINGLES_METERS
+                points = [
+                    camera.project(point) for point in (
+                        (x, near_side, 0.0), (x, far_side, 0.0),
+                        (x, far_side, NET_POST_HEIGHT_METERS), (x, near_side, NET_POST_HEIGHT_METERS),
+                    )
+                ]
+                if all(point is not None for point in points):
+                    outline = np.asarray(points, dtype=np.float32)
+            self.net_cache[key] = outline
+        return self.net_cache[key]
+
+    def _clings(self, point: BallCandidate) -> bool:
+        return self.clinging_points([point]) == 1
+
+    def trim_clinging_ends(self, track: Sequence[BallCandidate]) -> list[BallCandidate]:
+        """The track without a run of points glued to a player at either end.
+
+        The ball sits on the racket for a frame at a contact. When a track starts or ends with
+        several points on the outline of a player, nothing beyond them shows the ball leaving
+        the racket: the growth followed the racket or the arm once the ball had gone, as after
+        a serve that is too fast to be seen.
+        """
+        start, end = 0, len(track)
+        while start < end and self._clings(track[start]):
+            start += 1
+        if start < PLAYER_CLING_MIN_END_RUN:
+            start = 0
+        trailing = end
+        while trailing > start and self._clings(track[trailing - 1]):
+            trailing -= 1
+        if end - trailing >= PLAYER_CLING_MIN_END_RUN:
+            end = trailing
+        return list(track[start:end])
+
+    def runs_along_the_net(self, track: Sequence[BallCandidate]) -> bool:
+        if not all(point.source in UNCORROBORATED_SOURCES for point in track):
+            return False
+        on_net = 0
+        for point in track:
+            outline = self.net_band(point.frame_position)
+            if outline is not None and cv2.pointPolygonTest(
+                outline, (float(point.x), float(point.y)), True
+            ) >= -NET_BAND_MARGIN_PIXELS:
+                on_net += 1
+        return on_net >= NET_TRACK_MIN_FRACTION * len(track)
 
     def _image_to_court(self, position: int) -> np.ndarray | None:
         corners = self.frames[position].get("court_corners")
@@ -193,6 +270,23 @@ class _Stabilizer:
         if len(offsets) < PLAYER_ATTACHED_MIN_FRACTION * len(track):
             return None
         return offsets
+
+    def clinging_points(self, track: Sequence[BallCandidate]) -> int:
+        """How many points of the track lie on or right next to the box of a player."""
+        clinging = 0
+        for point in track:
+            for detection in self.frames[point.frame_position]["detections"]:
+                if detection["class"] != "player":
+                    continue
+                box = detection["bbox"]
+                gap = math.hypot(
+                    max(box[0] - point.x, 0.0, point.x - box[2]),
+                    max(box[1] - point.y, 0.0, point.y - box[3]),
+                )
+                if gap <= PLAYER_CLING_MAX_HEIGHTS * max(box[3] - box[1], 1.0):
+                    clinging += 1
+                    break
+        return clinging
 
     def positions(self, track: Sequence[BallCandidate]) -> list[tuple[float, float]]:
         raw = [(point.x, point.y) for point in track]
@@ -235,6 +329,7 @@ def _is_ball_like(track: Sequence[BallCandidate], stabilizer: _Stabilizer, limit
         and _travel(stabilizer.positions(track)) >= limits.min_travel
         and _travel([(point.x, point.y) for point in track]) >= limits.min_travel
         and not _moves_with_a_player(track, stabilizer, limits)
+        and not stabilizer.runs_along_the_net(track)
     )
 
 
@@ -245,7 +340,14 @@ def _moves_with_a_player(track: Sequence[BallCandidate], stabilizer: _Stabilizer
     if all(point.source in UNCORROBORATED_SOURCES for point in track):
         return True
     screen_travel = _travel([(point.x, point.y) for point in track])
-    return _travel(offsets) < max(limits.min_travel, PLAYER_ATTACHED_MAX_RELATIVE_TRAVEL * screen_travel)
+    if _travel(offsets) < max(limits.min_travel, PLAYER_ATTACHED_MAX_RELATIVE_TRAVEL * screen_travel):
+        return True
+    duration = track[-1].time - track[0].time
+    return (
+        stabilizer.clinging_points(track) >= PLAYER_ATTACHED_MIN_FRACTION * len(track)
+        and duration > 0
+        and _travel(offsets) / duration < PLAYER_CLING_MAX_RELATIVE_SPEED_RATIO * limits.max_speed
+    )
 
 
 def build_tracklets(
@@ -320,6 +422,70 @@ def select_tracklets(
         if reachable:
             selected.append(track)
     return sorted(selected, key=lambda track: track[0].time)
+
+
+def _is_smooth(points: Sequence[BallCandidate], limits: _Limits) -> bool:
+    """Whether the per-frame image velocity never jumps by more than a bridge allows."""
+    velocities = []
+    for previous, following in zip(points, points[1:]):
+        frames = following.frame_position - previous.frame_position
+        velocities.append(((following.x - previous.x) / frames, (following.y - previous.y) / frames))
+    return all(
+        math.hypot(after[0] - before[0], after[1] - before[1]) <= limits.gate * BRIDGE_GATE_MULTIPLIER
+        for before, after in zip(velocities, velocities[1:])
+    )
+
+
+def fill_skipped_frames(
+    selected: Sequence[Sequence[BallCandidate]],
+    tracklets: Sequence[Sequence[BallCandidate]],
+    limits: _Limits,
+) -> list[list[BallCandidate]]:
+    """Measurements a selected tracklet stepped over, taken from tracklets that share its edges.
+
+    Seeds may span a few frames, so a tracklet can leap straight over a bounce: the arc before
+    and the arc after line up, and the frames at the bounce, which follow neither, are skipped.
+    Other tracklets grown from the same measurement on either side do follow the ball into those
+    frames, but lose the selection to the longer one. Their candidates there are real
+    measurements that obeyed the motion model from a shared point, so they fill the gap, as
+    long as the whole stretch stays smooth: a bounce bends the path, a stray blob jumps off it.
+    """
+    owners: dict[int, list[tuple[Sequence[BallCandidate], int]]] = {}
+    for tracklet in tracklets:
+        for index, point in enumerate(tracklet):
+            owners.setdefault(id(point), []).append((tracklet, index))
+
+    def continuation(edge: BallCandidate, low: int, high: int, step: int) -> list[BallCandidate]:
+        best: list[BallCandidate] = []
+        for tracklet, index in owners.get(id(edge), ()):
+            points = []
+            position = index + step
+            while 0 <= position < len(tracklet) and low < tracklet[position].frame_position < high:
+                points.append(tracklet[position])
+                position += step
+            if len(points) > len(best):
+                best = points
+        return best
+
+    filled = []
+    for track in selected:
+        result = [track[0]]
+        for previous, following in zip(track, track[1:]):
+            if following.frame_position - previous.frame_position > 1:
+                low, high = previous.frame_position, following.frame_position
+                ahead = continuation(previous, low, high, 1)
+                covered = {point.frame_position for point in ahead}
+                behind = [
+                    point for point in continuation(following, low, high, -1)
+                    if point.frame_position not in covered
+                    and point.frame_position > max(covered, default=low)
+                ]
+                inserted = sorted(ahead + behind, key=lambda point: point.frame_position)
+                if inserted and _is_smooth([previous, *inserted, following], limits):
+                    result.extend(inserted)
+            result.append(following)
+        filled.append(result)
+    return filled
 
 
 def _estimate(points: Sequence[BallCandidate], time: float) -> tuple[float, float, float, float]:
@@ -409,6 +575,7 @@ def track_ball(
     frames: list[dict],
     candidates_by_frame: Sequence[Sequence[dict]],
     image_width: float,
+    image_height: float | None = None,
 ) -> dict:
     """Add to each frame the ball that the candidates of the whole video agree on, if any."""
     times = [frame["timestamp_seconds"] for frame in frames]
@@ -432,7 +599,15 @@ def track_ball(
         max_speed=image_width * MAX_BALL_IMAGE_SPEED_WIDTHS_PER_SECOND,
         min_travel=max(MIN_TRACKLET_TRAVEL_PIXELS, image_width * MIN_TRACKLET_TRAVEL_WIDTH_RATIO),
     )
-    tracklets = select_tracklets(build_tracklets(by_frame, times, limits), _Stabilizer(frames), limits)
+    candidates = build_tracklets(by_frame, times, limits)
+    stabilizer = _Stabilizer(frames, image_height, image_width)
+    tracklets = [
+        trimmed for trimmed in (
+            stabilizer.trim_clinging_ends(track)
+            for track in fill_skipped_frames(select_tracklets(candidates, stabilizer, limits), candidates, limits)
+        )
+        if trimmed
+    ]
 
     measured = 0
     for track in tracklets:

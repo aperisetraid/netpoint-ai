@@ -5,7 +5,7 @@ from collections import deque
 import importlib.util
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import cv2
@@ -29,6 +29,9 @@ CALIBRATION_RETRY_INTERVAL = 5
 COURT_MAX_CORNER_DISPLACEMENT_RATIO = 0.025
 COURT_CALIBRATION_CONFIRMATIONS = 3
 COURT_RECALIBRATION_CONFIRMATIONS = 2
+# Line detection jitters by a few pixels and now and then tilts a baseline; the calibration is the
+# per-corner median of the latest consistent detections, so one bad frame cannot skew the court.
+COURT_SMOOTHING_WINDOW = 7
 PLAYER_BASELINE_MARGIN_METERS = 6.5
 PLAYER_SIDELINE_MARGIN_METERS = 3.0
 PLAYER_OFF_COURT_MIN_CONFIDENCE = 0.25
@@ -277,6 +280,12 @@ def mean_corner_displacement(
     first_points = np.asarray(first, dtype=np.float32)
     second_points = np.asarray(second, dtype=np.float32)
     return float(np.linalg.norm(first_points - second_points, axis=1).mean())
+
+
+def median_corners(detections: Sequence[list[tuple[int, int]]]) -> list[tuple[int, int]]:
+    """Per-corner median of several detections of the same court."""
+    stacked = np.asarray(detections, dtype=np.float64)
+    return [(round(float(x)), round(float(y))) for x, y in np.median(stacked, axis=0)]
 
 
 def player_within_tracking_region(
@@ -817,6 +826,7 @@ class TennisTracker:
         calibrated_corners = None
         pending_court_corners = None
         pending_court_corner_count = 0
+        court_corner_history: deque[list[tuple[int, int]]] = deque(maxlen=COURT_SMOOTHING_WINDOW)
         last_player_by_side = {}
         last_player_frame_by_side = {}
         previous_video_frame = None
@@ -878,6 +888,7 @@ class TennisTracker:
                 with stage("court_detect"):
                     detected_corners = self.court_detector.detect_corners(frame)
                 court_corners = detected_corners
+                consistent_detection = False
                 if detected_corners is None or len(detected_corners) != 4:
                     if homography_matrix is not None:
                         pending_court_corners = None
@@ -928,8 +939,16 @@ class TennisTracker:
                     else:
                         pending_court_corners = None
                         pending_court_corner_count = 0
+                        consistent_detection = True
 
                 if court_corners is not None and len(court_corners) == 4:
+                    if consistent_detection:
+                        court_corner_history.append(court_corners)
+                    else:
+                        # A first calibration or a confirmed jump (the camera moved) starts afresh.
+                        court_corner_history.clear()
+                        court_corner_history.append(court_corners)
+                    court_corners = median_corners(court_corner_history)
                     try:
                         homography_matrix = get_homography_matrix(court_corners)
                         calibrated_corners = court_corners
@@ -1179,7 +1198,7 @@ class TennisTracker:
         print(f"✨ Inferencia completada. {frame_count} fotogramas analizados.")
         fill_skipped_player_frames(telemetry, skipped_player_frames)
         with stage("track_ball"):
-            ball_summary = track_ball(telemetry, ball_candidates_by_frame, image_width)
+            ball_summary = track_ball(telemetry, ball_candidates_by_frame, image_width, image_height)
         print(
             f"🎾 Pelota: {ball_summary['measured_frames']} fotogramas medidos y "
             f"{ball_summary['interpolated_frames']} interpolados de {frame_count}; "

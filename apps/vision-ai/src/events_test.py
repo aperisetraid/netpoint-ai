@@ -9,6 +9,7 @@ from events import (
     classify_hits,
     detect_bounces,
     detect_hits,
+    detect_vanishing_strokes,
     estimate_ground_speed_kmh,
 )
 from homography import COURT_LENGTH_METERS, COURT_WIDTH_METERS
@@ -228,6 +229,38 @@ class SyntheticRallyTests(unittest.TestCase):
     def test_reconstructs_a_noisy_rally_at_30_fps(self):
         self.check(SyntheticRally(fps=30, noise=0.8, seed=3), 0.5)
 
+    def test_finds_a_bounce_hidden_in_frames_where_the_ball_was_not_seen(self):
+        rally = SyntheticRally(fps=60)
+        frame_seconds = rally.frames[1]["timestamp_seconds"]
+        # A fast ball over clay is often invisible for the last frames before it lands.
+        for frame in rally.frames:
+            if rally.second_bounce - 10 * frame_seconds < frame["timestamp_seconds"] < rally.second_bounce:
+                frame["detections"] = frame["detections"][:1]
+
+        events = build_events(rally.frames, *IMAGE_SIZE)
+
+        bounce = min(events["bounces"], key=lambda bounce: abs(bounce["timestamp_seconds"] - rally.second_bounce))
+        self.assertAlmostEqual(bounce["timestamp_seconds"], rally.second_bounce, delta=2 * frame_seconds)
+        self.assertEqual((bounce["side"], bounce["method"]), ("far", "fit3d"))
+        self.assertAlmostEqual(bounce["x_meters"], rally.landing[0], delta=1.0)
+        self.assertAlmostEqual(bounce["y_meters"], rally.landing[1], delta=1.0)
+        self.assertEqual([hit["player"] for hit in events["hits"]], ["near"])
+
+    def test_a_gap_without_a_bounce_adds_no_event(self):
+        rally = SyntheticRally(fps=60)
+        frame_seconds = rally.frames[1]["timestamp_seconds"]
+        middle = (rally.hit + rally.second_bounce) / 2
+        for frame in rally.frames:
+            if abs(frame["timestamp_seconds"] - middle) < 5 * frame_seconds:
+                frame["detections"] = frame["detections"][:1]
+
+        events = build_events(rally.frames, *IMAGE_SIZE)
+
+        self.assertFalse([
+            bounce for bounce in events["bounces"]
+            if rally.hit < bounce["timestamp_seconds"] < rally.second_bounce - 2 * frame_seconds
+        ])
+
     def test_smooth_flight_has_no_events_and_falls_back_without_calibration(self):
         rally = SyntheticRally(fps=60)
         flight = [
@@ -331,6 +364,12 @@ class BounceHeuristicTests(unittest.TestCase):
             frame["detections"][0]["x_meters"] = 24.2
         self.assertEqual(detect_bounces(frames, width, height), [])
 
+    def test_keeps_a_deep_bounce_whose_rising_ball_projects_beyond_the_baseline(self):
+        frames, width, height = bounce_frames([90, 94, 100, 97, 94])
+        for frame in frames[3:]:
+            frame["detections"][0]["x_meters"] = -0.8
+        self.assertEqual([bounce["frame_index"] for bounce in detect_bounces(frames, width, height)], [2])
+
 
 # Ball centres observed in a short real clip, as (frame, x, y) at 60 fps.
 SERVE_TOSS_AND_HIT = [
@@ -409,6 +448,49 @@ class HitHeuristicTests(unittest.TestCase):
             for frame in hit_frames(samples, box, carried=(2, 3, 4))
         ]
         self.assertEqual(detect_hits(carried, 1920), [])
+
+    def test_a_player_box_carried_forward_at_the_stroke_still_reaches_the_ball(self):
+        samples = [(index, x, 60) for index, x in enumerate((80, 95, 110, 125, 110, 95, 80))]
+        frames = [
+            dict(frame, timestamp_seconds=frame["frame_index"] / 30)
+            for frame in hit_frames(samples, [140, 35, 200, 115])
+        ]
+        for frame in frames[2:5]:
+            frame["detections"][1]["carried_forward"] = True
+        self.assertEqual(len(detect_hits(frames, 1920)), 1)
+
+
+def vanishing_frames(reappearance):
+    """A far server's toss falls above their head, then the ball is unseen until `reappearance`."""
+    server = {"class": "player", "confidence": 0.9, "bbox": [880, 140, 930, 260], "x_meters": -0.5, "y_meters": 4.5}
+    frames = []
+    for index in range(30):
+        detections = [dict(server)]
+        if index <= 8:
+            detections.append({
+                "class": "ball", "confidence": 0.9, "bbox": [915, 70 + 3 * index, 921, 76 + 3 * index],
+                "x_meters": -12.0, "y_meters": 4.5,
+            })
+        elif index == 26:
+            x, y, x_meters = reappearance
+            detections.append({
+                "class": "ball", "confidence": 0.9, "bbox": [x - 3, y - 3, x + 3, y + 3],
+                "x_meters": x_meters, "y_meters": 6.0,
+            })
+        frames.append({"frame_index": index, "timestamp_seconds": index / 50, "detections": detections})
+    return frames
+
+
+class VanishingStrokeTests(unittest.TestCase):
+    def test_a_serve_too_fast_to_see_is_placed_at_the_last_sight_of_the_toss(self):
+        stroke, = detect_vanishing_strokes(vanishing_frames((1010, 600, 17.0)), 1920, [])
+        self.assertEqual(stroke.frame["frame_index"], 8)
+
+    def test_a_ball_that_reappears_where_its_fall_was_taking_it_was_not_struck(self):
+        self.assertEqual(detect_vanishing_strokes(vanishing_frames((918, 127, 12.5)), 1920, []), [])
+
+    def test_a_ball_that_reappears_on_the_server_side_was_not_served(self):
+        self.assertEqual(detect_vanishing_strokes(vanishing_frames((1010, 600, 8.0)), 1920, []), [])
 
 
 def shot_frame(index, detections):

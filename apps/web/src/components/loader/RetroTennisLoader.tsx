@@ -29,8 +29,6 @@ function PixelCourt() {
     const context = canvas?.getContext('2d')
     if (!container || !canvas || !context) return
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const staticTime = 0.55
     let frameId = 0
     const startedAt = performance.now()
 
@@ -38,8 +36,9 @@ function PixelCourt() {
       const columns = Math.max(minimumColumns, Math.floor(container.clientWidth / pixelScale))
       if (canvas.width !== columns) canvas.width = columns
       canvas.style.width = `${columns * pixelScale}px`
-      if (prefersReducedMotion) drawRally(context, staticTime)
     }
+    // The animation is the only sign that work is going on, so it runs even when the system asks
+    // for reduced motion; a frozen loader reads as a hung page.
     const tick = (now: number) => {
       drawRally(context, (now - startedAt) / 1000)
       frameId = window.requestAnimationFrame(tick)
@@ -49,7 +48,7 @@ function PixelCourt() {
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(container)
-    if (!prefersReducedMotion) frameId = window.requestAnimationFrame(tick)
+    frameId = window.requestAnimationFrame(tick)
 
     return () => {
       observer.disconnect()

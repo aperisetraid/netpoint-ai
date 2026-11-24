@@ -130,13 +130,18 @@ def run(video: Path, output: Path, dump_candidates: Path | None = None) -> dict:
         # Keep what the ball tracker receives so it can be re-run offline in seconds.
         original_track_ball = tracker_module.track_ball
 
-        def track_and_dump(frames, candidates, image_width):
+        def track_and_dump(frames, candidates, image_width, image_height=None):
             with dump_candidates.open("wb") as handle:
                 pickle.dump(
-                    {"frames": copy.deepcopy(frames), "candidates": candidates, "image_width": image_width},
+                    {
+                        "frames": copy.deepcopy(frames),
+                        "candidates": candidates,
+                        "image_width": image_width,
+                        "image_height": image_height,
+                    },
                     handle,
                 )
-            return original_track_ball(frames, candidates, image_width)
+            return original_track_ball(frames, candidates, image_width, image_height)
 
         tracker_module.track_ball = track_and_dump
 

@@ -13,6 +13,7 @@ from dataclasses import replace
 from camera import Camera, estimate_camera, estimate_focal_length
 from homography import COURT_LENGTH_METERS, COURT_WIDTH_METERS
 from trajectory import (
+    CONTACT_MAX_HEIGHT_METERS,
     BallSample,
     Contact,
     Flight,
@@ -38,16 +39,23 @@ HIT_MIN_WINDOW_SAMPLES = 3
 HIT_MIN_DIRECTION_SPEED_WIDTHS_PER_SECOND = 0.01
 HIT_MIN_DIRECTION_CHANGE_DEGREES = 60
 HIT_MIN_VELOCITY_CHANGE_WIDTHS_PER_SECOND = 0.1
-HIT_PLAYER_REACH_HEIGHT_RATIO = 0.4
+# Arm plus racket reach about 0.8 of a player's height beyond the body; the box often misses the arm.
+HIT_PLAYER_REACH_HEIGHT_RATIO = 0.6
 HIT_MIN_PLAYER_REACH_PIXELS = 28
 HIT_COOLDOWN_SECONDS = 0.5
 HIT_BOUNCE_EXCLUSION_SECONDS = 0.1
+HIT_VANISH_WINDOW_SECONDS = 0.5
+HIT_VANISH_MIN_RETURN_RATIO = 0.2
+VANISH_CONTINUATION_WIDTH_RATIO = 0.02
+HIT_SHARPEN_SECONDS = 0.06
+HIT_SHARPEN_MIN_CHANGE_RATIO = 2.0
 
 SPEED_SEGMENT_COUNT = 3
 SPEED_WINDOW_SECONDS = 0.25
 SPEED_MAX_SEGMENT_GAP_SECONDS = 0.12
 MAX_PLAUSIBLE_SPEED_KMH = 265
 POINT_GAP_SECONDS = 4
+RALLY_BOUNCE_SECONDS = 1.5
 SERVE_BASELINE_TOLERANCE_METERS = 1
 VOLLEY_MAX_NET_DISTANCE_METERS = 6.4
 
@@ -66,6 +74,31 @@ BOUNCE_MIN_RESTITUTION = 0.3
 BOUNCE_MAX_RESTITUTION = 1.1
 BOUNCE_MAX_SPEED_GAIN = 1.1
 BOUNCE_OUT_MARGIN_METERS = 3.0
+
+# An image reversal within the near player's reach may be the racket rather than the ground: a
+# serve toss leaving several times faster than it fell, or flights on both sides that travel in
+# opposite directions along the court with the ball sent towards the far side at a stroke's pace.
+# A hit sends the ball to the opponent; one that would send it back to the hitter's side is not.
+REVERSAL_WINDOW_SECONDS = 0.3
+REVERSAL_MIN_SPEED_METERS_PER_SECOND = 2.0
+TOSS_MIN_SPEED_RATIO = 4.0
+STROKE_MIN_SPEED_METERS_PER_SECOND = 5.0
+# Arm, racket and a step towards the ball, measured from the player's feet.
+PLAYER_REACH_METERS = 2.5
+REACH_HEIGHT_STEP_METERS = 0.1
+
+# A fast ball over clay or a busy background can go unseen for a few frames right before it lands.
+# A bounce inside such a gap is accepted when a flight leaving the ground in the gap explains what
+# is seen afterwards, the ball reappears on the receiver's side, and it has not bounced there since
+# the last hit (a shot bounces once before the reply).
+GAP_MIN_FRAMES = 4
+GAP_MAX_SECONDS = 0.5
+GAP_EVENT_EXCLUSION_SECONDS = 0.1
+GAP_MIN_AFTER_SAMPLES = 6
+GAP_AFTER_WINDOW_SECONDS = 0.5
+GAP_BEFORE_WINDOW_SECONDS = 0.6
+GAP_MAX_SAMPLE_STEP_SECONDS = 0.1
+GAP_MIN_LAUNCH_VERTICAL_SPEED = 0.5
 
 MIN_UNANCHORED_FLIGHT_SAMPLES = 10
 MIN_UNANCHORED_FLIGHT_SECONDS = 0.4
@@ -130,7 +163,9 @@ def _refine_bounce_time(samples: Sequence[BallSample], index: int) -> float:
 
 def detect_bounces(frames: Sequence[dict], image_width: float, image_height: float) -> list[dict]:
     """Bounces as reversals of the ball's vertical image motion away from the players."""
-    samples = collect_ball_samples(frames, predicate=_inside_court)
+    # Only the contact has to be on the court: a ball rising off a deep bounce projects
+    # beyond the baseline, and dropping those samples would hide the bounce itself.
+    samples = collect_ball_samples(frames)
     bounces: list[dict] = []
     rise_threshold = max(2.0, image_height * BOUNCE_MIN_RISE_RATIO)
     sideways_threshold = max(12.0, image_width * BOUNCE_MAX_SIDEWAYS_DEVIATION_RATIO)
@@ -140,7 +175,11 @@ def detect_bounces(frames: Sequence[dict], image_width: float, image_height: flo
         for index in range(2, len(trajectory) - 2):
             candidate = trajectory[index]
             previous, following = trajectory[index - 1], trajectory[index + 1]
-            if candidate.bottom <= previous.bottom or candidate.bottom < following.bottom:
+            if (
+                candidate.bottom <= previous.bottom
+                or candidate.bottom < following.bottom
+                or not _inside_court(candidate.ball)
+            ):
                 continue
 
             before = [
@@ -187,8 +226,10 @@ def detect_bounces(frames: Sequence[dict], image_width: float, image_height: flo
 
 
 def _within_player_reach(sample: BallSample) -> bool:
+    # A box carried forward is at most a few frames old: YOLO often loses the player
+    # exactly at the stroke, when the arm and racket blur.
     for detection in sample.frame["detections"]:
-        if detection["class"] != "player" or detection.get("carried_forward"):
+        if detection["class"] != "player":
             continue
         left, top, right, bottom = detection["bbox"]
         reach = max(HIT_MIN_PLAYER_REACH_PIXELS, (bottom - top) * HIT_PLAYER_REACH_HEIGHT_RATIO)
@@ -253,7 +294,126 @@ def detect_hits(
         cluster.append(candidate)
     if cluster:
         hits.append(max(cluster, key=lambda item: item[1])[0])
-    return hits
+    return [_contact_before_vanishing(_sharpen_hit(hit, samples, image_width), samples) for hit in hits]
+
+
+def detect_vanishing_strokes(
+    frames: Sequence[dict],
+    image_width: float,
+    hits: Sequence[BallSample],
+) -> list[BallSample]:
+    """Serves and smashes: the ball falls above a player's head and is next seen across the net.
+
+    A struck serve is too fast to be detected, so there is no motion after the contact to
+    measure; the last sight of the falling ball at the server is the contact.
+    """
+    samples = collect_ball_samples(frames, HIT_MIN_BALL_CONFIDENCE)
+    steps = sorted(b.time - a.time for a, b in zip(samples, samples[1:]) if b.time > a.time)
+    if not steps:
+        return []
+    frame_seconds = steps[len(steps) // 2]
+    strokes = []
+    for position in range(len(samples) - 1):
+        contact, reappeared = samples[position], samples[position + 1]
+        gap = reappeared.time - contact.time
+        if gap < GAP_MIN_FRAMES * frame_seconds or gap > GAP_MAX_SECONDS:
+            continue
+        if any(abs(hit.time - contact.time) <= HIT_COOLDOWN_SECONDS for hit in hits):
+            continue
+        hitter = _find_hitter(contact)
+        landing = _metric_position(reappeared.ball)
+        if hitter is None or landing is None or not _within_player_reach(contact):
+            continue
+        if contact.y >= hitter["bbox"][1] or side_of(landing[0]) == side_of(_metric_position(hitter)[0]):
+            continue
+        falling = [
+            sample for sample in samples[:position + 1]
+            if 0 <= contact.time - sample.time <= KINK_WINDOW_SECONDS
+        ]
+        if len(falling) < KINK_MIN_WINDOW_SAMPLES:
+            continue
+        velocity = fit_velocity(falling)
+        if velocity[1] <= 0:
+            continue
+        # A ball that merely went unseen for a few frames reappears where its fall was taking it.
+        expected = (contact.x + velocity[0] * gap, contact.y + velocity[1] * gap)
+        if math.hypot(reappeared.x - expected[0], reappeared.y - expected[1]) <= (
+            image_width * VANISH_CONTINUATION_WIDTH_RATIO
+        ):
+            continue
+        strokes.append(contact)
+    return strokes
+
+
+def _sharpen_hit(hit: BallSample, samples: Sequence[BallSample], image_width: float) -> BallSample:
+    """The frame of a hit where short velocity windows on both sides differ most.
+
+    The long windows that make detection robust also flatten the peak over several frames,
+    so the contact is located again with short windows next to the first estimate.
+    """
+    trajectory = next(
+        (
+            trajectory for trajectory in split_trajectories(samples, image_width)
+            if any(sample is hit for sample in trajectory)
+        ),
+        None,
+    )
+    if trajectory is None:
+        return hit
+    # Where the short windows see no clear contact, the first estimate stands.
+    best = hit
+    best_change = image_width * HIT_MIN_VELOCITY_CHANGE_WIDTHS_PER_SECOND * HIT_SHARPEN_MIN_CHANGE_RATIO
+    for contact in trajectory:
+        if abs(contact.time - hit.time) > HIT_SHARPEN_SECONDS or not _within_player_reach(contact):
+            continue
+        before = [s for s in trajectory if 0 <= contact.time - s.time <= KINK_WINDOW_SECONDS]
+        after = [s for s in trajectory if 0 <= s.time - contact.time <= KINK_WINDOW_SECONDS]
+        if len(before) < KINK_MIN_WINDOW_SAMPLES or len(after) < KINK_MIN_WINDOW_SAMPLES:
+            continue
+        before_velocity, after_velocity = fit_velocity(before), fit_velocity(after)
+        change = math.hypot(after_velocity[0] - before_velocity[0], after_velocity[1] - before_velocity[1])
+        if change > best_change:
+            best, best_change = contact, change
+    return best
+
+
+def _contact_before_vanishing(hit: BallSample, samples: Sequence[BallSample]) -> BallSample:
+    """The last sight of the ball at the player when it then vanishes, as after a fast serve.
+
+    The motion measured on the way up of a serve toss can pass for the contact; the real one is
+    the last frame the ball is seen at the racket before it leaves too fast to be detected. A
+    toss rises from the player and falls back to the racket, while a ball already struck only
+    moves away from them.
+    """
+    position = next(index for index, sample in enumerate(samples) if sample is hit)
+    following = samples[position + 1:]
+    if not following:
+        return hit
+    steps = sorted(b.time - a.time for a, b in zip(samples, samples[1:]) if b.time > a.time)
+    frame_seconds = steps[len(steps) // 2]
+    chain = [hit]
+    for sample in following:
+        if not _within_player_reach(sample):
+            contact = chain[-1]
+            vanished = sample.time - contact.time >= GAP_MIN_FRAMES * frame_seconds
+            hitter = _find_hitter(contact)
+            if not vanished or hitter is None or contact is hit:
+                return hit
+            box = hitter["bbox"]
+            farthest = max(_distance_to_box(point, box) for point in chain)
+            returned = farthest - _distance_to_box(contact, box)
+            return contact if returned >= HIT_VANISH_MIN_RETURN_RATIO * (box[3] - box[1]) else hit
+        if sample.time - hit.time > HIT_VANISH_WINDOW_SECONDS:
+            return hit
+        chain.append(sample)
+    return hit
+
+
+def _distance_to_box(sample: BallSample, box: Sequence[float]) -> float:
+    return math.hypot(
+        max(box[0] - sample.x, 0.0, sample.x - box[2]),
+        max(box[1] - sample.y, 0.0, sample.y - box[3]),
+    )
 
 
 def _find_hitter(sample: BallSample) -> dict | None:
@@ -323,7 +483,15 @@ def classify_hits(
         player_x, player_y = _metric_position(hitter)
         player = side_of(player_x)
         previous = hits[-1] if hits else None
-        starts_point = previous is None or sample.time - previous["timestamp_seconds"] > POINT_GAP_SECONDS
+        # A ball that just bounced on the player's side is in play, however long since the
+        # last hit that was seen: a point never starts with a bounce at the server's feet.
+        in_play = any(
+            bounce["side"] == player and 0 < sample.time - bounce["timestamp_seconds"] <= RALLY_BOUNCE_SECONDS
+            for bounce in bounces
+        )
+        starts_point = previous is None or (
+            sample.time - previous["timestamp_seconds"] > POINT_GAP_SECONDS and not in_play
+        )
         if starts_point:
             point_index += 1
 
@@ -667,6 +835,277 @@ def confirm_bounce_kinks(
     return confirmed
 
 
+def _sample_at_frame(samples: Sequence[BallSample], frame_index: int) -> BallSample | None:
+    return next((sample for sample in samples if sample.frame["frame_index"] == frame_index), None)
+
+
+def _ray_reaches_player(camera: Camera | None, sample: BallSample, player: dict) -> bool:
+    """Whether the ball, wherever it is along its camera ray, can be within a player's reach."""
+    if camera is None:
+        return True
+    player_x, player_y = _metric_position(player)
+    steps = round(CONTACT_MAX_HEIGHT_METERS / REACH_HEIGHT_STEP_METERS)
+    for step in range(steps + 1):
+        point = camera.backproject(sample.x, sample.y, step * REACH_HEIGHT_STEP_METERS)
+        if point is not None and math.hypot(point[0] - player_x, point[1] - player_y) <= PLAYER_REACH_METERS:
+            return True
+    return False
+
+
+def reversal_is_hit(
+    frames: Sequence[dict],
+    cameras: Sequence[Camera | None],
+    image_width: float,
+    bounce: dict,
+) -> bool:
+    """Whether an image reversal next to a player was the racket rather than the ground."""
+    samples = collect_ball_samples(frames)
+    sample = _sample_at_frame(samples, bounce["frame_index"])
+    if sample is None or not _within_player_reach(sample):
+        return False
+    time = bounce["timestamp_seconds"]
+    trajectory = next(
+        (
+            trajectory for trajectory in split_trajectories(samples, image_width)
+            if trajectory[0].time <= time <= trajectory[-1].time
+        ),
+        None,
+    )
+    hitter = _find_hitter(sample)
+    # With the camera behind the near baseline, a stroke by the far player turns the ball from
+    # moving up the image to moving down it, the opposite of a bounce, so only the near player's
+    # strokes can pass for one.
+    if trajectory is None or hitter is None or side_of(_metric_position(hitter)[0]) != "near":
+        return False
+    # Close on screen is not close on court: the racket has to reach the ball somewhere along
+    # the camera ray through it, at a height a stroke can be played at.
+    if not _ray_reaches_player(cameras[sample.frame_position], sample, hitter):
+        return False
+
+    # A serve toss falls slowly above the server's head and leaves several times faster;
+    # a bounce never speeds the ball up like that.
+    toss_before = [s for s in trajectory if 0 < time - s.time <= KINK_WINDOW_SECONDS]
+    toss_after = [s for s in trajectory if 0 <= s.time - time <= KINK_WINDOW_SECONDS]
+    if (
+        sample.y < hitter["bbox"][1]
+        and len(toss_before) >= KINK_MIN_WINDOW_SAMPLES
+        and len(toss_after) >= KINK_MIN_WINDOW_SAMPLES
+        and math.hypot(*fit_velocity(toss_after))
+        >= TOSS_MIN_SPEED_RATIO * math.hypot(*fit_velocity(toss_before))
+    ):
+        return True
+
+    # Otherwise the reversal is fitted as a bounce. A slow ball leaves its depth loosely
+    # constrained, so only a clear turn back along the court gives the racket away: the
+    # ball often just overlaps a player on screen while it lands far behind them.
+    before = [s for s in trajectory if time - REVERSAL_WINDOW_SECONDS <= s.time < time]
+    after = [s for s in trajectory if time <= s.time <= time + REVERSAL_WINDOW_SECONDS]
+    ground = Contact("bounce", time)
+    landing = fit_flight(before, [cameras[s.frame_position] for s in before], image_width, None, ground)
+    leaving = fit_flight(after, [cameras[s.frame_position] for s in after], image_width, ground, None)
+    if landing is None or leaving is None:
+        return False
+    incoming = landing.state_at(time)[3]
+    outgoing = leaving.state_at(time)[3]
+    if incoming * outgoing >= 0 or min(abs(incoming), abs(outgoing)) < REVERSAL_MIN_SPEED_METERS_PER_SECOND:
+        return False
+    # Read as a stroke by the near player instead, the ball has to leave towards the far side
+    # at a stroke's pace; a ball drifting back towards the camera was not hit by them.
+    return _sent_towards_opponent(after, cameras, image_width, time, hitter) is not False
+
+
+def _sent_towards_opponent(
+    after: Sequence[BallSample],
+    cameras: Sequence[Camera | None],
+    image_width: float,
+    time: float,
+    hitter: dict,
+) -> bool | None:
+    """Whether a stroke at `time` sends the ball to the other side; None when it cannot be told."""
+    stroke = fit_flight(
+        after,
+        [cameras[s.frame_position] for s in after],
+        image_width,
+        Contact("hit", time, _metric_position(hitter)[0]),
+        None,
+    )
+    if stroke is None:
+        return None
+    towards_far = stroke.state_at(time)[3] <= -STROKE_MIN_SPEED_METERS_PER_SECOND
+    towards_near = stroke.state_at(time)[3] >= STROKE_MIN_SPEED_METERS_PER_SECOND
+    return towards_far if side_of(_metric_position(hitter)[0]) == "near" else towards_near
+
+
+def stroke_is_plausible(
+    frames: Sequence[dict],
+    cameras: Sequence[Camera | None],
+    image_width: float,
+    hit: BallSample,
+) -> bool:
+    """A racket sends the ball towards the opponent; a ball drifting back is something else."""
+    hitter = _find_hitter(hit)
+    if hitter is None:
+        return True
+    trajectory = next(
+        (
+            trajectory for trajectory in split_trajectories(collect_ball_samples(frames), image_width)
+            if trajectory[0].time <= hit.time <= trajectory[-1].time
+        ),
+        None,
+    )
+    if trajectory is None:
+        return True
+    after = [s for s in trajectory if hit.time <= s.time <= hit.time + REVERSAL_WINDOW_SECONDS]
+    return _sent_towards_opponent(after, cameras, image_width, hit.time, hitter) is not False
+
+
+def detect_gap_bounces(
+    frames: Sequence[dict],
+    cameras: Sequence[Camera | None],
+    image_width: float,
+    bounces: Sequence[dict],
+    hits: Sequence[dict],
+) -> list[dict]:
+    """Bounces hidden in a stretch of frames where the ball was not seen."""
+    samples = collect_ball_samples(frames)
+    if len(samples) < 2:
+        return []
+    steps = sorted(b.time - a.time for a, b in zip(samples, samples[1:]) if b.time > a.time)
+    frame_seconds = steps[len(steps) // 2] if steps else 0.0
+    if frame_seconds <= 0:
+        return []
+    contacts = sorted(
+        [Contact("bounce", bounce["timestamp_seconds"]) for bounce in bounces]
+        + [Contact("hit", hit["timestamp_seconds"], hit["player_position"]["x"]) for hit in hits],
+        key=lambda contact: contact.time,
+    )
+    hits_by_time = sorted(hits, key=lambda hit: hit["timestamp_seconds"])
+    found: list[dict] = []
+
+    for position in range(len(samples) - 1):
+        last_seen, reappeared = samples[position], samples[position + 1]
+        gap = reappeared.time - last_seen.time
+        if gap < GAP_MIN_FRAMES * frame_seconds or gap > GAP_MAX_SECONDS:
+            continue
+        # The ball often vanishes right at a contact (a serve leaves too fast to be seen), so
+        # only a contact inside the gap or where the ball is seen again rules it out.
+        if any(
+            last_seen.time < contact.time <= reappeared.time + GAP_EVENT_EXCLUSION_SECONDS
+            for contact in contacts
+        ):
+            continue
+        if not _inside_court(reappeared.ball) or _within_player_reach(reappeared):
+            continue
+        last_hit = next(
+            (hit for hit in reversed(hits_by_time) if hit["timestamp_seconds"] <= last_seen.time),
+            None,
+        )
+        receiver_side = _metric_position(reappeared.ball)
+        if last_hit is None or side_of(receiver_side[0]) == last_hit["player"]:
+            continue
+        next_hit = next(
+            (hit for hit in hits_by_time if hit["timestamp_seconds"] > reappeared.time),
+            None,
+        )
+        reply_time = next_hit["timestamp_seconds"] if next_hit is not None else math.inf
+        if any(
+            last_hit["timestamp_seconds"] < contact.time < reply_time and contact.kind == "bounce"
+            for contact in contacts
+        ):
+            continue
+
+        start = next((c for c in reversed(contacts) if c.time <= last_seen.time), None)
+        end = next((c for c in contacts if c.time >= reappeared.time), None)
+        after = [reappeared]
+        for sample in samples[position + 2:]:
+            if (
+                sample.time - after[-1].time > GAP_MAX_SAMPLE_STEP_SECONDS
+                or sample.time - reappeared.time > GAP_AFTER_WINDOW_SECONDS
+                or (end is not None and sample.time >= end.time)
+            ):
+                break
+            after.append(sample)
+        if len(after) < GAP_MIN_AFTER_SAMPLES:
+            continue
+        end = end if end is not None and end.time <= after[-1].time + GAP_MAX_SAMPLE_STEP_SECONDS else None
+        before = [
+            sample for sample in samples[:position + 1]
+            if last_seen.time - sample.time <= GAP_BEFORE_WINDOW_SECONDS
+            and (start is None or sample.time >= start.time)
+        ]
+        before_start = start if start is not None and before and start.time <= before[0].time else None
+        after_cameras = [cameras[sample.frame_position] for sample in after]
+        before_cameras = [cameras[sample.frame_position] for sample in before]
+
+        # When the ball before and after the gap is one flight, nothing happened in between.
+        joined = fit_flight(before + after, before_cameras + after_cameras, image_width, before_start, end)
+        if joined is not None:
+            continue
+
+        def plausible(flight: Flight, time: float) -> tuple[float, float] | None:
+            x_meters, y_meters, _ = flight.position_at(time)
+            if (
+                flight.state[5] < GAP_MIN_LAUNCH_VERTICAL_SPEED
+                or side_of(x_meters) == last_hit["player"]
+                or not -BOUNCE_OUT_MARGIN_METERS <= x_meters <= COURT_LENGTH_METERS + BOUNCE_OUT_MARGIN_METERS
+                or not -BOUNCE_OUT_MARGIN_METERS <= y_meters <= COURT_WIDTH_METERS + BOUNCE_OUT_MARGIN_METERS
+            ):
+                return None
+            return x_meters, y_meters
+
+        def fit_leaving(contact: Contact) -> Flight | None:
+            # The next hit only hints at the depth; a fast ball fitted short of it can disagree.
+            return (
+                fit_flight(after, after_cameras, image_width, contact, end)
+                or (fit_flight(after, after_cameras, image_width, contact, None) if end is not None else None)
+            )
+
+        # With the ball seen on its way down, the bounce is the instant where a flight landing
+        # there and one leaving from there agree; both are fitted freely and then checked.
+        best = None
+        steps_in_gap = max(1, round(gap / frame_seconds))
+        for step in range(1, steps_in_gap + 1):
+            contact = Contact("bounce", last_seen.time + gap * step / steps_in_gap)
+            landing = fit_flight(before, before_cameras, image_width, before_start, contact)
+            leaving = fit_leaving(contact)
+            if landing is None or leaving is None or not bounce_is_physical(landing, leaving, contact.time):
+                continue
+            position = plausible(leaving, contact.time)
+            if position is None:
+                continue
+            error = math.sqrt(
+                (len(before) * landing.rms_pixels ** 2 + len(after) * leaving.rms_pixels ** 2)
+                / (len(before) + len(after))
+            )
+            if best is None or error < best[0]:
+                best = (error, contact, *position, True)
+
+        # Unseen all the way down, a single flight cannot tell when it left the ground: any
+        # instant in the gap fits. The ball is then placed where it is seen again, which is
+        # right after the bounce when nothing of its descent was visible.
+        if best is None:
+            contact = Contact("bounce", reappeared.time)
+            leaving = fit_leaving(contact)
+            position = None if leaving is None else plausible(leaving, contact.time)
+            if position is not None:
+                best = (leaving.rms_pixels, contact, *position, False)
+        if best is None:
+            continue
+        _, contact, x_meters, y_meters, physical = best
+        frame = min(frames, key=lambda other: abs(other["timestamp_seconds"] - contact.time))
+        found.append({
+            "timestamp_seconds": contact.time,
+            "frame_index": frame["frame_index"],
+            "x_meters": x_meters,
+            "y_meters": y_meters,
+            "side": side_of(x_meters),
+            "confidence": CONFIDENCE_TWO_FLIGHTS if physical else CONFIDENCE_ONE_FLIGHT,
+            "method": "fit3d",
+        })
+        contacts = sorted([*contacts, contact], key=lambda other: other.time)
+    return found
+
+
 def build_events(
     frames: list[dict],
     image_width: int,
@@ -681,18 +1120,28 @@ def build_events(
     if not frames or not image_width or not image_height:
         return {"bounces": [], "hits": []}
 
-    bounces = detect_bounces(frames, image_width, image_height)
-    hit_samples = detect_hits(
-        frames,
-        image_width,
-        [bounce["timestamp_seconds"] for bounce in bounces],
+    cameras = build_cameras(frames, (image_width, image_height))
+    bounces = [
+        bounce for bounce in detect_bounces(frames, image_width, image_height)
+        if not reversal_is_hit(frames, cameras, image_width, bounce)
+    ]
+    hit_samples = [
+        hit for hit in detect_hits(frames, image_width, [bounce["timestamp_seconds"] for bounce in bounces])
+        if stroke_is_plausible(frames, cameras, image_width, hit)
+    ]
+    hit_samples = sorted(
+        hit_samples + detect_vanishing_strokes(frames, image_width, hit_samples),
+        key=lambda hit: hit.time,
     )
     hits = classify_hits(frames, hit_samples, bounces, handedness)
 
-    cameras = build_cameras(frames, (image_width, image_height))
+    gap_bounces = detect_gap_bounces(frames, cameras, image_width, bounces, hits)
+    if gap_bounces:
+        bounces = sorted(bounces + gap_bounces, key=lambda bounce: bounce["timestamp_seconds"])
     extra_bounces = confirm_bounce_kinks(frames, cameras, image_width, bounces, hits)
     if extra_bounces:
         bounces = sorted(bounces + extra_bounces, key=lambda bounce: bounce["timestamp_seconds"])
+    if gap_bounces or extra_bounces:
         # Volleys are told apart from groundstrokes by the bounces between two hits.
         hits = classify_hits(frames, hit_samples, bounces, handedness)
     flights = reconstruct_flights(frames, cameras, image_width, bounces, hits)

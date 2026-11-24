@@ -1,6 +1,14 @@
 import unittest
 
-from tracker import MAX_PLAYER_CARRY_FORWARD_FRAMES, fill_skipped_player_frames
+from tracker import MAX_PLAYER_CARRY_FORWARD_FRAMES, fill_skipped_player_frames, median_corners
+
+
+class CourtSmoothingTests(unittest.TestCase):
+    def test_one_tilted_detection_does_not_move_the_calibration(self):
+        steady = [(633, 261), (1279, 265), (1509, 815), (412, 809)]
+        jittered = [(632, 262), (1278, 264), (1510, 814), (411, 808)]
+        tilted = [(637, 247), (1282, 275), (1511, 816), (410, 808)]
+        self.assertEqual(median_corners([steady, tilted, jittered]), [(633, 261), (1279, 265), (1510, 815), (411, 808)])
 
 
 def player(x, y=5.0, bbox=(0.0, 0.0, 10.0, 20.0), confidence=0.9, **extra):

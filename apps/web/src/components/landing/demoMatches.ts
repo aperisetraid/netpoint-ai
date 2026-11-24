@@ -1,5 +1,5 @@
-import test1Url from '../../../../../assets/Test 1 - Trim.mp4?url'
-import test2Url from '../../../../../assets/Test 2 - Trim.mp4?url'
+import test1Url from '../../../../assets/Test - Trim.mp4?url'
+import test2Url from '../../../../assets/Test corto.mp4?url'
 
 export interface DemoMatch {
   id: string
@@ -9,20 +9,20 @@ export interface DemoMatch {
   url: string
 }
 
-/** Clips shipped in the repository `assets` folder. */
+/** Clips shipped in the repository `apps/assets` folder. */
 export const demoMatches: DemoMatch[] = [
   {
     id: 'test-1',
     title: 'Intercambio desde el fondo',
     description: 'Intercambio de fondo con saque y botes en pista.',
-    fileName: 'Test 1 - Trim.mp4',
+    fileName: 'Test - Trim.mp4',
     url: test1Url,
   },
   {
     id: 'test-2',
-    title: 'Juego con cambios de dirección',
-    description: 'Secuencia de juego con golpes y cambios de dirección.',
-    fileName: 'Test 2 - Trim.mp4',
+    title: 'Clip corto de juego',
+    description: 'Secuencia breve de juego con golpes y botes.',
+    fileName: 'Test corto.mp4',
     url: test2Url,
   },
 ]

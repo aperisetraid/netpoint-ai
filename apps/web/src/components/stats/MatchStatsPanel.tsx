@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
-import { ChartNoAxesCombined } from 'lucide-react'
+import { ChartNoAxesCombined, Download } from 'lucide-react'
 
+import { downloadJson } from '../../lib/downloadJson.ts'
 import { formatSpeed, formatTime } from '../../lib/format.ts'
 import { calculateMatchStatistics } from '../../lib/matchStatistics.ts'
 import { summarizeShots } from '../../lib/shotSummary.ts'
@@ -98,6 +99,10 @@ export function MatchStatsPanel({ telemetry, currentTime, playerNames, view }: M
         <CoverageRow label="Pelota" detectedFrames={statistics.coverage.ballFrames}
           totalFrames={statistics.coverage.frameCount} kind="ball" />
       </section>
+      <button type="button" className="btn btn--ghost" onClick={() => downloadJson(telemetry, 'telemetria.json')}>
+        <Download size={16} strokeWidth={1.75} aria-hidden="true" />
+        Descargar telemetría
+      </button>
     </div>
   )
 }

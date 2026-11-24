@@ -1,11 +1,10 @@
-import { courtPalette, sideColors, withAlpha } from '../../../lib/palette.ts'
+import { sideColors, withAlpha } from '../../../lib/palette.ts'
 import type { BounceEvent } from '../../../services/api'
 import { applyHomography, type Homography } from './geometry.ts'
 
 export const rippleSeconds = 0.9
-/** How long the landing mark stays on the court after the ripple. */
-export const bounceMarkSeconds = 6
-const markRadiusMeters = 0.16
+/** Bounces are only visible while their ripple animation plays. */
+export const bounceMarkSeconds = rippleSeconds
 const rippleStartRadiusMeters = 0.2
 const rippleEndRadiusMeters = 1.5
 const ringSegments = 40
@@ -32,7 +31,7 @@ function traceCourtCircle(
 
 /**
  * Draws one bounce `age` seconds after contact: rings expanding on the court plane, so they
- * follow the perspective of the video, and a landing mark that fades afterwards.
+ * follow the perspective of the video. Nothing stays on the court afterwards.
  */
 export function drawBounce(
   context: CanvasRenderingContext2D,
@@ -58,13 +57,4 @@ export function drawBounce(
     context.lineWidth = (3.5 - 2 * progress) * unit
     context.stroke()
   }
-
-  const markOpacity = Math.min(1, age / 0.08) * Math.min(1, (bounceMarkSeconds - age) / 1.5)
-  const impact = age < 0.25 ? 1 + 0.8 * (1 - age / 0.25) : 1
-  traceCourtCircle(context, courtToImage, bounce, markRadiusMeters * impact)
-  context.fillStyle = withAlpha(color, 0.85 * markOpacity)
-  context.fill()
-  context.strokeStyle = withAlpha(courtPalette.line, 0.9 * markOpacity)
-  context.lineWidth = 1.5 * unit
-  context.stroke()
 }

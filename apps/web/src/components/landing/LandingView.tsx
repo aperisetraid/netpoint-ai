@@ -40,7 +40,7 @@ export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLi
       <QuickStart onSelect={onSelectVideo} />
 
       <footer className="landing-footer">
-        <span>NetPoint AI. Trabajo Fin de Máster.</span>
+        <span>NetPoint AI</span>
         <a href="#landing-title">Volver arriba</a>
       </footer>
     </div>
