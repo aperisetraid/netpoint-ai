@@ -5,15 +5,17 @@ import numpy as np
 
 from camera import Camera, estimate_camera, estimate_focal_length
 from events import (
+    build_cameras,
     build_events,
     classify_hits,
+    confirm_bounce_kinks,
     detect_bounces,
     detect_hits,
     detect_vanishing_strokes,
     estimate_ground_speed_kmh,
 )
 from homography import COURT_LENGTH_METERS, COURT_WIDTH_METERS
-from trajectory import GRAVITY, Contact, _simulate, collect_ball_samples, fit_flight
+from trajectory import GRAVITY, Contact, _simulate, collect_ball_samples, fit_flight, launch_velocity
 
 
 IMAGE_SIZE = (1920, 1080)
@@ -123,6 +125,96 @@ class SyntheticRally:
         return _simulate(state, [time - start])[0][:3]
 
 
+def fast_serve_frames(fps=50):
+    """A 216 km/h serve from behind the far baseline, unseen from the racket to the ground."""
+    camera = broadcast_camera()
+    corners = court_corners(camera)
+    server, receiver = (-0.5, 4.5), (25.0, 9.5)
+    serve = (server[0], server[1], 2.8, 58.5, 1.5, -8.5)
+    toss = (server[0], server[1], 3.3, 0.0, 0.0, 0.0)
+    toss_seconds = math.sqrt(2 * 0.5 / GRAVITY)
+    contact = 0.6
+    landing = contact + landing_time(serve)
+    rebound = bounce_off_ground(_simulate(serve, [landing - contact])[0])
+
+    def box(position):
+        feet, head = camera.project((*position, 0.0)), camera.project((*position, 1.9))
+        half = (feet[1] - head[1]) * 0.2
+        return {
+            "class": "player", "confidence": 0.9, "bbox": [feet[0] - half, head[1], feet[0] + half, feet[1]],
+            "x_meters": position[0], "y_meters": position[1],
+        }
+
+    frames = []
+    for index in range(int((landing + 0.3) * fps)):
+        time = index / fps
+        detections = [box(server), box(receiver)]
+        if contact - toss_seconds <= time <= contact:
+            position = _simulate(toss, [time - (contact - toss_seconds)])[0][:3]
+        elif time >= landing:
+            position = _simulate(rebound, [time - landing])[0][:3]
+        else:
+            position = None
+        if position is not None:
+            u, v = camera.project(position)
+            ground = camera.backproject(u, v, 0.0)
+            detections.append({
+                "class": "ball", "confidence": 0.7, "bbox": [u - 4, v - 4, u + 4, v + 4],
+                "x_meters": ground[0], "y_meters": ground[1],
+            })
+        frames.append({
+            "frame_index": index, "timestamp_seconds": time, "court_corners": corners, "detections": detections,
+        })
+    return frames, math.hypot(*serve[3:]) * 3.6
+
+
+def kick_serve_frames(fps=60, dip=5.0):
+    """A serve from the near baseline whose topspin pulls it down harder than gravity alone."""
+    camera = broadcast_camera()
+    corners = court_corners(camera)
+    server, receiver = (24.2, 6.6), (-1.0, 3.0)
+    state = [23.6, 6.6, 2.9, -40.0, -2.5, -1.0]
+    step, elapsed, path = 0.001, 0.0, []
+    while state[2] > 0:
+        drag = 0.0204 * math.sqrt(sum(value * value for value in state[3:]))
+        for axis in range(3):
+            state[axis] += state[axis + 3] * step
+        state[3] -= drag * state[3] * step
+        state[4] -= drag * state[4] * step
+        state[5] -= (GRAVITY + dip + drag * state[5]) * step
+        elapsed += step
+        path.append((elapsed, tuple(state[:3])))
+    landing = tuple(state)
+    rebound = (landing[0], landing[1], 0.0, landing[3] * 0.7, landing[4] * 0.7, -landing[5] * 0.7)
+
+    def box(position):
+        feet, head = camera.project((*position, 0.0)), camera.project((*position, 1.9))
+        half = (feet[1] - head[1]) * 0.2
+        return {
+            "class": "player", "confidence": 0.9, "bbox": [feet[0] - half, head[1], feet[0] + half, feet[1]],
+            "x_meters": position[0], "y_meters": position[1],
+        }
+
+    frames = []
+    for index in range(int((elapsed + 0.3) * fps)):
+        time = index / fps
+        if time < elapsed:
+            position = min(path, key=lambda point: abs(point[0] - time))[1] if time > 0 else (23.6, 6.6, 2.9)
+        else:
+            position = _simulate(rebound, [time - elapsed])[0][:3]
+        u, v = camera.project(position)
+        ground = camera.backproject(u, v, 0.0)
+        frames.append({
+            "frame_index": index, "timestamp_seconds": time, "court_corners": corners,
+            "detections": [box(server), box(receiver), {
+                "class": "ball", "confidence": 0.7, "bbox": [u - 4, v - 4, u + 4, v + 4],
+                "x_meters": ground[0], "y_meters": ground[1],
+            }],
+        })
+    serve = {"timestamp_seconds": 0.0, "player": "near", "player_position": {"x": server[0], "y": server[1]}}
+    return frames, serve, elapsed, (landing[0], landing[1])
+
+
 class CameraTests(unittest.TestCase):
     def test_recovers_focal_length_and_projection_from_rounded_corners(self):
         for focal, offset in ((2600.0, 0.0), (1800.0, 0.0), (2600.0, 1.5), (3500.0, -3.0)):
@@ -182,6 +274,17 @@ class FlightTests(unittest.TestCase):
     def test_drag_free_fall_matches_gravity(self):
         height = _simulate((0, 0, 10.0, 0, 0, 0), [0.2])[0][2]
         self.assertAlmostEqual(height, 10.0 - GRAVITY * 0.02, delta=0.01)
+
+    def test_recovers_the_launch_velocity_of_a_fast_serve_from_its_landing(self):
+        # A 216 km/h serve hit at 2.8 m from behind the far baseline.
+        serve = (-0.5, 4.5, 2.8, 59.0, 1.5, -6.0)
+        duration = landing_time(serve)
+        landing = _simulate(serve, [duration])[0]
+
+        velocity = launch_velocity(serve[:3], (landing[0], landing[1], 0.0), duration)
+
+        self.assertIsNotNone(velocity)
+        self.assertAlmostEqual(math.hypot(*velocity) * 3.6, math.hypot(*serve[3:]) * 3.6, delta=1.0)
 
 
 class SyntheticRallyTests(unittest.TestCase):
@@ -304,6 +407,30 @@ class SyntheticRallyTests(unittest.TestCase):
 
         self.assertEqual([hit["player"] for hit in events["hits"]], ["near"])
         self.assertAlmostEqual(events["hits"][0]["timestamp_seconds"], rally.hit, delta=2 * frame_seconds)
+
+    def test_speed_of_a_serve_unseen_until_it_bounced_comes_from_its_landing(self):
+        frames, launch_kmh = fast_serve_frames()
+
+        events = build_events(frames, *IMAGE_SIZE)
+
+        self.assertEqual([(hit["player"], hit["type"]) for hit in events["hits"]], [("far", "serve")])
+        serve = events["hits"][0]
+        self.assertIsNotNone(serve["speed_kmh"])
+        # The bounce is placed where the ball is seen again, so the estimate may only err low.
+        self.assertLessEqual(serve["speed_kmh"], launch_kmh + 5)
+        self.assertGreaterEqual(serve["speed_kmh"], launch_kmh - 25)
+        self.assertAlmostEqual(serve["ball"]["z"], 2.8, delta=0.5)
+
+    def test_confirms_the_bounce_of_a_serve_whose_spin_the_flight_model_lacks(self):
+        frames, serve, bounce_time, landing = kick_serve_frames()
+        cameras = build_cameras(frames, IMAGE_SIZE)
+
+        bounces = confirm_bounce_kinks(frames, cameras, IMAGE_SIZE[0], [], [serve])
+
+        self.assertEqual(len(bounces), 1)
+        self.assertAlmostEqual(bounces[0]["timestamp_seconds"], bounce_time, delta=2 / 60)
+        self.assertEqual(bounces[0]["side"], "far")
+        self.assertAlmostEqual(bounces[0]["x_meters"], landing[0], delta=1.0)
 
     def test_a_gap_without_a_bounce_adds_no_event(self):
         rally = SyntheticRally(fps=60)

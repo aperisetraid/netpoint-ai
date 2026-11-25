@@ -381,3 +381,40 @@ def fit_flight(
         rms,
         end is not None,
     )
+
+
+def launch_velocity(
+    start: Sequence[float],
+    end: Sequence[float],
+    duration: float,
+    iterations: int = 30,
+    tolerance_meters: float = 1e-3,
+) -> tuple[float, float, float] | None:
+    """Velocity that carries the ball from `start` to `end` in `duration` seconds under gravity and drag.
+
+    Solved with Newton's method from the drag-free guess; None when it does not converge.
+    """
+    if duration <= 0:
+        return None
+    start_point, target = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
+    velocity = (target - start_point) / duration
+    velocity[2] += GRAVITY * duration / 2
+
+    def miss(candidate: np.ndarray) -> np.ndarray:
+        return np.asarray(_simulate((*start_point, *candidate), [duration])[0][:3]) - target
+
+    step = 1e-4
+    for _ in range(iterations):
+        error = miss(velocity)
+        if np.linalg.norm(error) <= tolerance_meters:
+            break
+        jacobian = np.column_stack([(miss(velocity + delta) - error) / step for delta in np.eye(3) * step])
+        try:
+            velocity = velocity - np.linalg.solve(jacobian, error)
+        except np.linalg.LinAlgError:
+            return None
+        if not np.all(np.isfinite(velocity)) or np.linalg.norm(velocity) > MAX_BALL_SPEED_METERS_PER_SECOND * 2:
+            return None
+    if np.linalg.norm(miss(velocity)) > tolerance_meters:
+        return None
+    return tuple(float(value) for value in velocity)

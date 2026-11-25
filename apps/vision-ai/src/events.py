@@ -22,6 +22,7 @@ from trajectory import (
     fit_flight,
     fit_velocity,
     is_finite_number,
+    launch_velocity,
     split_trajectories,
 )
 
@@ -963,6 +964,12 @@ def confirm_bounce_kinks(
                 end is None and trajectory[-1].time > last_time
             ):
                 best = fit_bounce(trimmed_start, trimmed_end, unseen_since, last_time)
+        if best is None and start is not None and start.kind == "hit":
+            # Heavy spin bends a stroke away from the drag-only model, which then cannot also
+            # start the flight at the racket; the ball's own path still shows where it landed.
+            best = fit_bounce(None, end, first_time=start.time) or fit_bounce(
+                None, None, first_time=start.time, last_time=kink.time + KINK_SEEN_AFTER_SECONDS
+            )
         if best is None:
             continue
         error, contact, landing = best
@@ -1251,6 +1258,62 @@ def detect_gap_bounces(
     return found
 
 
+def _contact_point(camera: Camera | None, sample: BallSample, player: dict) -> tuple[float, float, float] | None:
+    """Where along the camera ray through the ball it passes closest above the hitter's feet."""
+    if camera is None:
+        return None
+    player_x, player_y = player["x"], player["y"]
+    best = None
+    steps = round(CONTACT_MAX_HEIGHT_METERS / REACH_HEIGHT_STEP_METERS)
+    for step in range(steps + 1):
+        height = step * REACH_HEIGHT_STEP_METERS
+        point = camera.backproject(sample.x, sample.y, height)
+        if point is None:
+            continue
+        distance = math.hypot(point[0] - player_x, point[1] - player_y)
+        if distance <= PLAYER_REACH_METERS and (best is None or distance < best[0]):
+            best = (distance, (point[0], point[1], height))
+    return None if best is None else best[1]
+
+
+def _speed_to_next_bounce(
+    hit: dict,
+    sample: BallSample,
+    camera: Camera | None,
+    bounces: Sequence[dict],
+    hits: Sequence[dict],
+) -> tuple[float, tuple[float, float, float]] | None:
+    """Launch speed (km/h) and contact point of a ball too fast to be seen until it bounced.
+
+    A fast serve is not detected between the racket and the ground, so no flight can be fitted
+    to it; the contact and the bounce across the net pin the flight down instead. The bounce is
+    placed where the ball is seen again, at or after the real one, so the speed errs low.
+    """
+    time = hit["timestamp_seconds"]
+    bounce = min(
+        (bounce for bounce in bounces if bounce["timestamp_seconds"] > time),
+        key=lambda bounce: bounce["timestamp_seconds"],
+        default=None,
+    )
+    if (
+        bounce is None
+        or bounce["side"] == hit["player"]
+        or bounce["timestamp_seconds"] - time > GAP_MAX_SECONDS + HIT_VELOCITY_WINDOW_SECONDS
+        or any(time < other["timestamp_seconds"] < bounce["timestamp_seconds"] for other in hits)
+    ):
+        return None
+    contact = _contact_point(camera, sample, hit["player_position"])
+    if contact is None:
+        return None
+    velocity = launch_velocity(
+        contact, (bounce["x_meters"], bounce["y_meters"], 0.0), bounce["timestamp_seconds"] - time
+    )
+    if velocity is None:
+        return None
+    speed = math.hypot(*velocity) * 3.6
+    return (speed, contact) if speed <= MAX_PLAUSIBLE_SPEED_KMH else None
+
+
 def build_events(
     frames: list[dict],
     image_width: int,
@@ -1319,6 +1382,7 @@ def build_events(
                 else CONFIDENCE_ONE_FLIGHT
             )
 
+    flown = set()
     for hit in hits:
         time = hit["timestamp_seconds"]
         leaving = next(
@@ -1340,6 +1404,22 @@ def build_events(
             speed = leaving.speed_at(time) * 3.6
             if speed <= MAX_PLAUSIBLE_SPEED_KMH:
                 hit["speed_kmh"] = speed
+                flown.add(id(hit))
+
+    # Without a flight leaving the racket, the speed would come from the ground projection of a
+    # ball in the air; the contact and the bounce that follows it pin the flight down better.
+    for hit in hits:
+        if id(hit) in flown:
+            continue
+        sample = next((sample for sample in hit_samples if sample.time == hit["timestamp_seconds"]), None)
+        if sample is None:
+            continue
+        estimate = _speed_to_next_bounce(hit, sample, cameras[sample.frame_position], bounces, hits)
+        if estimate is not None:
+            hit["speed_kmh"], contact = estimate
+            if hit["ball"]["z"] is None:
+                hit["ball"] = {"x": contact[0], "y": contact[1], "z": contact[2]}
+                hit["confidence"] = CONFIDENCE_ONE_FLIGHT
 
     # Ground projections are replaced last: the 2D speed fallback above relies on them.
     for flight, samples, _, _ in flights:
