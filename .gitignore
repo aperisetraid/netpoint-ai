@@ -35,3 +35,5 @@ env/
 apps/vision-ai/temp/
 temp/
 debug/
+# Tiempos del benchmark (dependen de la máquina)
+apps/vision-ai/benchmarks/*.timing.json

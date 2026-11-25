@@ -49,6 +49,9 @@ HIT_VANISH_MIN_RETURN_RATIO = 0.2
 VANISH_CONTINUATION_WIDTH_RATIO = 0.02
 HIT_SHARPEN_SECONDS = 0.06
 HIT_SHARPEN_MIN_CHANGE_RATIO = 2.0
+# YOLO often loses a player for a fraction of a second right at the stroke, when the arm and
+# racket blur; for hit detection the player is placed between the detections around the loss.
+HIT_LOST_PLAYER_MAX_SECONDS = 1.0
 
 SPEED_SEGMENT_COUNT = 3
 SPEED_WINDOW_SECONDS = 0.25
@@ -68,6 +71,11 @@ KINK_TIME_OFFSETS_FRAMES = (-0.5, 0.0, 0.5, 1.0)
 # A bounce must explain the samples clearly better than one uninterrupted flight does.
 KINK_MIN_SINGLE_FLIGHT_ERROR_RATIO = 1.3
 KINK_SINGLE_FLIGHT_ERROR_MARGIN_PIXELS = 0.3
+# When the flights between known events do not explain a kink, a hit may have been missed: the
+# ball unseen for a few frames or the player lost at the stroke. The bounce is then fitted to the
+# ball seen continuously around it.
+KINK_UNSEEN_GAP_FRAMES = 4
+KINK_SEEN_AFTER_SECONDS = 0.3
 BOUNCE_SIDEWAYS_DEADBAND_RATIO = 0.003
 BOUNCE_MAX_FLIGHT_DISAGREEMENT_METERS = 1.0
 BOUNCE_MIN_RESTITUTION = 0.3
@@ -297,15 +305,60 @@ def detect_hits(
     return [_contact_before_vanishing(_sharpen_hit(hit, samples, image_width), samples) for hit in hits]
 
 
+def with_lost_players(frames: Sequence[dict]) -> list[dict]:
+    """Shallow copies of the frames where a player missing for a moment is interpolated.
+
+    Each side of the net is bridged between the detections around the loss; the frames
+    themselves are left untouched, so the exported telemetry only holds what was detected.
+    """
+    anchors: dict[str, list[tuple[int, dict]]] = {"far": [], "near": []}
+    present: list[set[str]] = []
+    for position, frame in enumerate(frames):
+        sides = set()
+        for detection in frame["detections"]:
+            if detection["class"] != "player" or _metric_position(detection) is None:
+                continue
+            side = side_of(detection["x_meters"])
+            sides.add(side)
+            if not detection.get("carried_forward") and not detection.get("interpolated"):
+                anchors[side].append((position, detection))
+        present.append(sides)
+
+    views = [dict(frame, detections=list(frame["detections"])) for frame in frames]
+    for side, points in anchors.items():
+        for (start, before), (end, after) in zip(points, points[1:]):
+            if (
+                end - start < 2
+                or frames[end]["timestamp_seconds"] - frames[start]["timestamp_seconds"] > HIT_LOST_PLAYER_MAX_SECONDS
+            ):
+                continue
+            for position in range(start + 1, end):
+                if side in present[position]:
+                    continue
+                weight = (position - start) / (end - start)
+                views[position]["detections"].append({
+                    **before,
+                    "confidence": min(before["confidence"], after["confidence"]),
+                    "bbox": [a + (b - a) * weight for a, b in zip(before["bbox"], after["bbox"])],
+                    "x_meters": before["x_meters"] + (after["x_meters"] - before["x_meters"]) * weight,
+                    "y_meters": before["y_meters"] + (after["y_meters"] - before["y_meters"]) * weight,
+                    "interpolated": True,
+                })
+    return views
+
+
 def detect_vanishing_strokes(
     frames: Sequence[dict],
     image_width: float,
     hits: Sequence[BallSample],
+    bounces: Sequence[dict] = (),
 ) -> list[BallSample]:
-    """Serves and smashes: the ball falls above a player's head and is next seen across the net.
+    """Strokes after which the ball is not seen for a while and is next seen across the net.
 
-    A struck serve is too fast to be detected, so there is no motion after the contact to
-    measure; the last sight of the falling ball at the server is the contact.
+    A struck serve or smash is too fast to be detected, so there is no motion after the contact
+    to measure; the last sight of the falling ball at the server is the contact. A groundstroke
+    can hide the ball behind the hitter's body just as well: a ball that has just bounced on the
+    hitter's side and is next seen moving away from them was struck where it was last seen.
     """
     samples = collect_ball_samples(frames, HIT_MIN_BALL_CONFIDENCE)
     steps = sorted(b.time - a.time for a, b in zip(samples, samples[1:]) if b.time > a.time)
@@ -324,7 +377,11 @@ def detect_vanishing_strokes(
         landing = _metric_position(reappeared.ball)
         if hitter is None or landing is None or not _within_player_reach(contact):
             continue
-        if contact.y >= hitter["bbox"][1] or side_of(landing[0]) == side_of(_metric_position(hitter)[0]):
+        hitter_side = side_of(_metric_position(hitter)[0])
+        above_head = contact.y < hitter["bbox"][1]
+        # A fast serve is next seen landing across the net. A groundstroke is next seen in the
+        # air, where the ground projection says little about the side, so its direction decides.
+        if above_head and side_of(landing[0]) == hitter_side:
             continue
         falling = [
             sample for sample in samples[:position + 1]
@@ -333,7 +390,10 @@ def detect_vanishing_strokes(
         if len(falling) < KINK_MIN_WINDOW_SAMPLES:
             continue
         velocity = fit_velocity(falling)
-        if velocity[1] <= 0:
+        if above_head:
+            if velocity[1] <= 0:
+                continue
+        elif not _struck_after_bounce(samples[position + 1:], velocity, contact, hitter_side, bounces):
             continue
         # A ball that merely went unseen for a few frames reappears where its fall was taking it.
         expected = (contact.x + velocity[0] * gap, contact.y + velocity[1] * gap)
@@ -343,6 +403,34 @@ def detect_vanishing_strokes(
             continue
         strokes.append(contact)
     return strokes
+
+
+def _struck_after_bounce(
+    following: Sequence[BallSample],
+    incoming: tuple[float, float],
+    contact: BallSample,
+    hitter_side: str,
+    bounces: Sequence[dict],
+) -> bool:
+    """Whether a ball lost at a player below their head was a groundstroke rather than a miss.
+
+    The ball must have bounced on the hitter's side just before, been coming towards them, and
+    reappear moving away from them: up the image from the near player, down it from the far one.
+    """
+    if not any(
+        bounce["side"] == hitter_side and 0 < contact.time - bounce["timestamp_seconds"] <= RALLY_BOUNCE_SECONDS
+        for bounce in bounces
+    ):
+        return False
+    if not following:
+        return False
+    reappeared = following[0]
+    leaving = [sample for sample in following if sample.time - reappeared.time <= KINK_WINDOW_SECONDS]
+    if len(leaving) < KINK_MIN_WINDOW_SAMPLES:
+        return False
+    outgoing = fit_velocity(leaving)
+    towards_hitter = 1 if hitter_side == "near" else -1
+    return incoming[1] * towards_hitter > 0 and outgoing[1] * towards_hitter < 0
 
 
 def _sharpen_hit(hit: BallSample, samples: Sequence[BallSample], image_width: float) -> BallSample:
@@ -698,12 +786,34 @@ def bounce_is_physical(landing: Flight, leaving: Flight, time: float) -> bool:
     )
 
 
+def _racket_can_reach(camera: Camera | None, sample: BallSample) -> bool:
+    """Whether a player close to the ball on screen could also reach it on court.
+
+    A ball landing a few meters in front of the far player overlaps them on screen; only the
+    camera ray through it tells the bounce apart from a stroke.
+    """
+    for detection in sample.frame["detections"]:
+        if detection["class"] != "player":
+            continue
+        left, top, right, bottom = detection["bbox"]
+        reach = max(HIT_MIN_PLAYER_REACH_PIXELS, (bottom - top) * HIT_PLAYER_REACH_HEIGHT_RATIO)
+        if not (left - reach <= sample.x <= right + reach and top - reach <= sample.y <= bottom + reach):
+            continue
+        if _metric_position(detection) is None or _ray_reaches_player(camera, sample, detection):
+            return True
+    return False
+
+
 def detect_bounce_kinks(
     trajectories: Sequence[Sequence[BallSample]],
     image_width: float,
     event_timestamps: Sequence[float],
+    cameras: Sequence[Camera | None] | None = None,
 ) -> list[BallSample]:
-    """Samples where the image velocity jumps upwards away from players and known events."""
+    """Samples where the image velocity jumps upwards away from players and known events.
+
+    With `cameras`, a player counts as close only when the ball can be within their reach on court.
+    """
     threshold = image_width * KINK_MIN_UPWARD_IMPULSE_WIDTHS_PER_SECOND
     kinks: list[BallSample] = []
     for trajectory in trajectories:
@@ -722,7 +832,11 @@ def detect_bounce_kinks(
             impulse = fit_velocity(before)[1] - fit_velocity(after)[1]
             if (
                 impulse < threshold
-                or _within_player_reach(contact)
+                or (
+                    _within_player_reach(contact)
+                    if cameras is None
+                    else _racket_can_reach(cameras[contact.frame_position], contact)
+                )
                 or _center_inside_player(contact)
                 or any(abs(time - contact.time) <= KINK_EVENT_EXCLUSION_SECONDS for time in event_timestamps)
             ):
@@ -754,8 +868,14 @@ def confirm_bounce_kinks(
         + [Contact("hit", hit["timestamp_seconds"], hit["player_position"]["x"]) for hit in hits],
         key=lambda contact: contact.time,
     )
+    steps = sorted(
+        later.time - earlier.time
+        for trajectory in trajectories
+        for earlier, later in zip(trajectory, trajectory[1:])
+    )
+    median_frame_seconds = steps[len(steps) // 2] if steps else 0.0
     confirmed = []
-    for kink in detect_bounce_kinks(trajectories, image_width, [contact.time for contact in contacts]):
+    for kink in detect_bounce_kinks(trajectories, image_width, [contact.time for contact in contacts], cameras):
         trajectory = next(
             trajectory for trajectory in trajectories
             if trajectory[0].time <= kink.time <= trajectory[-1].time
@@ -774,53 +894,78 @@ def confirm_bounce_kinks(
         )
         frame_seconds = kink.time - previous_time
 
-        # The contact falls between two frames, and a short flight fitted from the wrong
-        # instant can settle on a mirrored depth, so nearby instants compete.
-        best = None
-        for offset in KINK_TIME_OFFSETS_FRAMES:
-            contact = Contact("bounce", kink.time + offset * frame_seconds)
-            before = [
+        def fit_bounce(
+            start: Contact | None,
+            end: Contact | None,
+            first_time: float = -math.inf,
+            last_time: float = math.inf,
+        ) -> tuple[float, Contact, Flight] | None:
+            seen = [
                 sample for sample in trajectory
-                if sample.time < contact.time and (start is None or sample.time >= start.time)
+                if first_time <= sample.time <= last_time
+                and (start is None or sample.time >= start.time)
+                and (end is None or sample.time < end.time)
             ]
-            after = [
-                sample for sample in trajectory
-                if sample.time >= contact.time and (end is None or sample.time < end.time)
-            ]
-            landing = fit_flight(
-                before, [cameras[sample.frame_position] for sample in before], image_width, start, contact
+            # The contact falls between two frames, and a short flight fitted from the wrong
+            # instant can settle on a mirrored depth, so nearby instants compete.
+            best = None
+            for offset in KINK_TIME_OFFSETS_FRAMES:
+                contact = Contact("bounce", kink.time + offset * frame_seconds)
+                before = [sample for sample in seen if sample.time < contact.time]
+                after = [sample for sample in seen if sample.time >= contact.time]
+                landing = fit_flight(
+                    before, [cameras[sample.frame_position] for sample in before], image_width, start, contact
+                )
+                if landing is None:
+                    continue
+                leaving = fit_flight(
+                    after,
+                    [cameras[sample.frame_position] for sample in after],
+                    image_width,
+                    replace(contact, landing_state=landing.state_at(contact.time)),
+                    end,
+                )
+                if leaving is None or not bounce_is_physical(landing, leaving, contact.time):
+                    continue
+                error = math.sqrt(
+                    (len(before) * landing.rms_pixels ** 2 + len(after) * leaving.rms_pixels ** 2)
+                    / (len(before) + len(after))
+                )
+                if best is None or error < best[0]:
+                    best = (error, contact, landing)
+            if best is None:
+                return None
+            uninterrupted = fit_flight(seen, [cameras[sample.frame_position] for sample in seen], image_width, start, end)
+            if uninterrupted is not None and uninterrupted.rms_pixels <= (
+                KINK_MIN_SINGLE_FLIGHT_ERROR_RATIO * best[0] + KINK_SINGLE_FLIGHT_ERROR_MARGIN_PIXELS
+            ):
+                return None
+            return best
+
+        best = fit_bounce(start, end)
+        if best is None:
+            # A racket can strike the ball while it is unseen, and the detector often loses the
+            # player at the stroke, so a missed hit can join two flights on either side of the
+            # kink. The bounce is then fitted only to the ball seen without interruption since
+            # its last long gap and over a short stretch after it.
+            unseen_since = max(
+                (
+                    later.time for earlier, later in zip(trajectory, trajectory[1:])
+                    if later.time <= kink.time
+                    and later.time - earlier.time >= KINK_UNSEEN_GAP_FRAMES * median_frame_seconds
+                ),
+                default=-math.inf,
             )
-            if landing is None:
-                continue
-            leaving = fit_flight(
-                after,
-                [cameras[sample.frame_position] for sample in after],
-                image_width,
-                replace(contact, landing_state=landing.state_at(contact.time)),
-                end,
-            )
-            if leaving is None or not bounce_is_physical(landing, leaving, contact.time):
-                continue
-            error = math.sqrt(
-                (len(before) * landing.rms_pixels ** 2 + len(after) * leaving.rms_pixels ** 2)
-                / (len(before) + len(after))
-            )
-            if best is None or error < best[0]:
-                best = (error, contact, landing)
+            last_time = kink.time + KINK_SEEN_AFTER_SECONDS
+            trimmed_start = start if start is None or start.time >= unseen_since else None
+            trimmed_end = end if end is not None and end.time <= last_time else None
+            if trimmed_start is not start or trimmed_end is not end or (
+                end is None and trajectory[-1].time > last_time
+            ):
+                best = fit_bounce(trimmed_start, trimmed_end, unseen_since, last_time)
         if best is None:
             continue
         error, contact, landing = best
-        samples = [
-            sample for sample in trajectory
-            if (start is None or sample.time >= start.time) and (end is None or sample.time < end.time)
-        ]
-        uninterrupted = fit_flight(
-            samples, [cameras[sample.frame_position] for sample in samples], image_width, start, end
-        )
-        if uninterrupted is not None and uninterrupted.rms_pixels <= (
-            KINK_MIN_SINGLE_FLIGHT_ERROR_RATIO * error + KINK_SINGLE_FLIGHT_ERROR_MARGIN_PIXELS
-        ):
-            continue
         x_meters, y_meters, _ = landing.position_at(contact.time)
         confirmed.append({
             "timestamp_seconds": contact.time,
@@ -1121,16 +1266,19 @@ def build_events(
         return {"bounces": [], "hits": []}
 
     cameras = build_cameras(frames, (image_width, image_height))
+    # Hits, and reversals that may be hits, are judged with the players the detector lost at
+    # the stroke put back; the frames themselves keep only what was detected.
+    hit_frames = with_lost_players(frames)
     bounces = [
         bounce for bounce in detect_bounces(frames, image_width, image_height)
-        if not reversal_is_hit(frames, cameras, image_width, bounce)
+        if not reversal_is_hit(hit_frames, cameras, image_width, bounce)
     ]
     hit_samples = [
-        hit for hit in detect_hits(frames, image_width, [bounce["timestamp_seconds"] for bounce in bounces])
-        if stroke_is_plausible(frames, cameras, image_width, hit)
+        hit for hit in detect_hits(hit_frames, image_width, [bounce["timestamp_seconds"] for bounce in bounces])
+        if stroke_is_plausible(hit_frames, cameras, image_width, hit)
     ]
     hit_samples = sorted(
-        hit_samples + detect_vanishing_strokes(frames, image_width, hit_samples),
+        hit_samples + detect_vanishing_strokes(hit_frames, image_width, hit_samples, bounces),
         key=lambda hit: hit.time,
     )
     hits = classify_hits(frames, hit_samples, bounces, handedness)
@@ -1141,6 +1289,15 @@ def build_events(
     extra_bounces = confirm_bounce_kinks(frames, cameras, image_width, bounces, hits)
     if extra_bounces:
         bounces = sorted(bounces + extra_bounces, key=lambda bounce: bounce["timestamp_seconds"])
+    # A groundstroke hidden behind the hitter is told by the bounce before it, which the gap
+    # and kink detectors above may only just have found.
+    hidden_strokes = (
+        detect_vanishing_strokes(hit_frames, image_width, hit_samples, bounces)
+        if gap_bounces or extra_bounces
+        else []
+    )
+    if hidden_strokes:
+        hit_samples = sorted(hit_samples + hidden_strokes, key=lambda hit: hit.time)
     if gap_bounces or extra_bounces:
         # Volleys are told apart from groundstrokes by the bounces between two hits.
         hits = classify_hits(frames, hit_samples, bounces, handedness)

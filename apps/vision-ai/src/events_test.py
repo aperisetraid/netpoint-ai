@@ -246,6 +246,65 @@ class SyntheticRallyTests(unittest.TestCase):
         self.assertAlmostEqual(bounce["y_meters"], rally.landing[1], delta=1.0)
         self.assertEqual([hit["player"] for hit in events["hits"]], ["near"])
 
+    def assert_second_bounce_found(self, rally, events):
+        frame_seconds = rally.frames[1]["timestamp_seconds"]
+        bounce = min(events["bounces"], key=lambda bounce: abs(bounce["timestamp_seconds"] - rally.second_bounce))
+        self.assertAlmostEqual(bounce["timestamp_seconds"], rally.second_bounce, delta=2 * frame_seconds)
+        self.assertEqual((bounce["side"], bounce["method"]), ("far", "fit3d"))
+        self.assertAlmostEqual(bounce["x_meters"], rally.landing[0], delta=1.0)
+
+    def test_finds_a_bounce_in_front_of_the_far_player_who_overlaps_it_on_screen(self):
+        rally = SyntheticRally(fps=50)
+        # Three meters behind the bounce: close on screen, out of reach on court.
+        x, y = rally.landing[0] - 3.0, rally.landing[1]
+        feet, head = rally.camera.project((x, y, 0.0)), rally.camera.project((x, y, 1.85))
+        for frame in rally.frames:
+            frame["detections"].insert(1, {
+                "class": "player", "confidence": 0.9,
+                "bbox": [feet[0] - 20, head[1], feet[0] + 20, feet[1]],
+                "x_meters": x, "y_meters": y,
+            })
+
+        self.assert_second_bounce_found(rally, build_events(rally.frames, *IMAGE_SIZE))
+
+    def test_finds_a_bounce_after_a_hit_missed_while_the_ball_was_unseen(self):
+        rally = SyntheticRally(fps=50)
+        frame_seconds = rally.frames[1]["timestamp_seconds"]
+        # The ball is lost around the stroke and the detector loses the hitter too.
+        for frame in rally.frames:
+            offset = abs(frame["timestamp_seconds"] - rally.hit)
+            if offset < 8 * frame_seconds:
+                frame["detections"] = [d for d in frame["detections"] if d["class"] != "ball"]
+            if offset < 0.3:
+                frame["detections"] = [d for d in frame["detections"] if d["class"] != "player"]
+
+        self.assert_second_bounce_found(rally, build_events(rally.frames, *IMAGE_SIZE))
+
+    def test_finds_a_hit_while_the_detector_lost_the_hitter(self):
+        rally = SyntheticRally(fps=50)
+        lost = [frame for frame in rally.frames if abs(frame["timestamp_seconds"] - rally.hit) < 0.25]
+        for frame in lost:
+            frame["detections"] = [d for d in frame["detections"] if d["class"] != "player"]
+
+        events = build_events(rally.frames, *IMAGE_SIZE)
+
+        self.assertEqual([hit["player"] for hit in events["hits"]], ["near"])
+        self.assertAlmostEqual(events["hits"][0]["timestamp_seconds"], rally.hit, delta=0.06)
+        # The exported telemetry keeps only what was detected.
+        self.assertFalse([d for frame in lost for d in frame["detections"] if d["class"] == "player"])
+
+    def test_finds_a_groundstroke_while_the_ball_is_hidden_behind_the_hitter(self):
+        rally = SyntheticRally(fps=50)
+        frame_seconds = rally.frames[1]["timestamp_seconds"]
+        for frame in rally.frames:
+            if 0 < frame["timestamp_seconds"] - rally.hit < 12 * frame_seconds:
+                frame["detections"] = frame["detections"][:1]
+
+        events = build_events(rally.frames, *IMAGE_SIZE)
+
+        self.assertEqual([hit["player"] for hit in events["hits"]], ["near"])
+        self.assertAlmostEqual(events["hits"][0]["timestamp_seconds"], rally.hit, delta=2 * frame_seconds)
+
     def test_a_gap_without_a_bounce_adds_no_event(self):
         rally = SyntheticRally(fps=60)
         frame_seconds = rally.frames[1]["timestamp_seconds"]
