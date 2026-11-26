@@ -137,6 +137,15 @@ const MATCH_TELEMETRY_OBJECT_SCHEMA = {
         length_meters: { type: 'number' },
         width_meters: { type: 'number' },
         calibrated: { type: 'boolean' },
+        colors: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['surface'],
+          properties: {
+            surface: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' },
+            surround: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$' },
+          },
+        },
       },
     },
     frames: { type: 'array', items: FRAME_SCHEMA },

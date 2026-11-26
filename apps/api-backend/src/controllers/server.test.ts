@@ -347,7 +347,8 @@ test('process and telemetry endpoints preserve frame inspection metadata', async
   const inspectedTelemetry = {
     ...pythonTelemetry,
     video: { fps: null, width: 1280, height: 720, frame_count: 2 },
-    court: { ...pythonTelemetry.court, calibrated: true },
+    // Colours measured on the video must survive the response schema.
+    court: { ...pythonTelemetry.court, calibrated: true, colors: { surface: '#5574AF', surround: '#769B77' } },
     frames: [{
       ...pythonFrames[0],
       court_corners: [[100, 50], [1100, 50], [1200, 650], [50, 650]],

@@ -444,6 +444,20 @@ components:
               example: 10.97
             calibrated:
               type: boolean
+            colors:
+              type: object
+              additionalProperties: false
+              required: [surface]
+              description: Colores medidos en el vídeo (superficie dentro de las líneas y entorno fuera de ellas). Ausente si el vídeo no permite medirlos.
+              properties:
+                surface:
+                  type: string
+                  pattern: "^#[0-9A-Fa-f]{6}$"
+                  example: "#5574AF"
+                surround:
+                  type: string
+                  pattern: "^#[0-9A-Fa-f]{6}$"
+                  example: "#769B77"
         frames:
           type: array
           items:

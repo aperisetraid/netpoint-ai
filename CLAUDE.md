@@ -9,12 +9,12 @@ apps/web          React + Vite (UI)  ──HTTP/SSE──▶  apps/api-backend (
 packages/openapi-spec/openapi.yaml  → contrato de la API pública (mantenerlo sincronizado al cambiar endpoints)
 ```
 - **`apps/vision-ai/src`** (Python): pipeline de visión y biblioteca de partidos.
-  - `tracker.py` (detección/tracking), `ball_tracking.py`, `trajectory.py`, `events.py` (botes y golpes), `court_detector.py`, `homography.py`, `camera.py`.
+  - `tracker.py` (detección/tracking), `ball_tracking.py`, `trajectory.py`, `events.py` (botes y golpes), `court_detector.py`, `homography.py`, `camera.py`, `court_colors.py` (colores reales de la pista medidos en el vídeo, cacheados en `court_colors.json`).
   - `main.py` orquesta el pipeline; `server.py` expone FastAPI (`/process-video`, `/process-upload`, `/matches`, `/library/matches`, `/coach`); `library.py` persiste partidos en `temp/matches/<matchId>/`.
   - `coach/` — agente LLM (Anthropic API) con herramientas sobre la telemetría. Configurable con `NETPOINT_COACH_MODEL`, `NETPOINT_COACH_EFFORT` y credenciales `ANTHROPIC_*`.
   - `benchmark.py` — harness de regresión/velocidad; `stage_timers.py` — profiling (`NETPOINT_PROFILE=1`).
 - **`apps/api-backend/src`** (TypeScript, Fastify): arquitectura por capas `controllers/` → `use-cases/` → `domain/` + `infrastructure/`. Hace de proxy hacia `vision-ai` (URLs `http://localhost:8000` definidas en cada use-case). Usa `undici` (`long-running-fetch.ts`) para peticiones largas.
-- **`apps/web/src`** (React 19, Tailwind 4): `components/` por feature (landing, ingest, library, video, stats, coach, court, inspector, loader), `hooks/` (`useMatchAnalysis`, `useCoachChat`), `lib/` (lógica pura testeable), `services/` (clientes API).
+- **`apps/web/src`** (React 19, Tailwind 4): `components/` por feature (landing, ingest, library, video, stats, coach, court, replay3d, inspector, loader), `hooks/` (`useMatchAnalysis`, `useCoachChat`), `lib/` (lógica pura testeable), `services/` (clientes API).
 - Los directorios `src/` y `test/` de la raíz son residuales; el código vive en `apps/`.
 
 ## Stack Tecnológico

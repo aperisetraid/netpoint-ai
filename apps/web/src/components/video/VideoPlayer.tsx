@@ -5,9 +5,11 @@ import { formatTime } from '../../lib/format.ts'
 import type { MatchTelemetry } from '../../services/api'
 import { MatchCanvasOverlay } from './MatchCanvasOverlay'
 
-/** Lets other panels (the coach's timestamp links) move the video to an exact moment. */
+/** Lets other panels move the video to an exact moment, or read it more often than `timeupdate` fires. */
 export interface VideoPlayerHandle {
   seekTo: (seconds: number) => void
+  /** Current playback time, or null while there is no video. */
+  getTime: () => number | null
 }
 
 interface VideoPlayerProps {
@@ -35,6 +37,9 @@ export function VideoPlayer({ ref, sourceUrl, telemetry, onTimeChange, onPlaybac
       video.currentTime = target
       onTimeChange(target)
       setJump({ seconds: target, key: Date.now() })
+    },
+    getTime() {
+      return videoRef.current?.currentTime ?? null
     },
   }), [onTimeChange])
 

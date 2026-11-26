@@ -61,6 +61,8 @@ function App() {
     [telemetry, currentFrame, currentTime],
   )
 
+  const getVideoTime = useCallback(() => playerRef.current?.getTime() ?? null, [])
+
   // Timestamp links from the coach move the video; on stacked layouts the player is brought into view.
   const seekVideo = useCallback((seconds: number) => {
     playerRef.current?.seekTo(seconds)
@@ -173,6 +175,8 @@ function App() {
                   currentTime={currentTime}
                   isPlaying={isVideoPlaying}
                   playerNames={playerNames}
+                  getVideoTime={getVideoTime}
+                  onSeek={seekVideo}
                 />
               </div>
               {demoMode ? null : (

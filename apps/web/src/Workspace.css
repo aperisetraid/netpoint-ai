@@ -134,6 +134,8 @@
 .court-legend__count strong { color: var(--text); font-size: var(--fs-22); font-stretch: var(--wide); font-weight: 800; }
 .court-legend__note { line-height: 1.4; }
 
+.sidebar--replay { grid-template-rows: minmax(0, 1fr); }
+
 .sidebar__stats { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
 .sidebar__stats .tabs { padding-top: var(--s-1); }
 .sidebar__scroll { min-height: 0; overflow-y: auto; padding: var(--s-4); }
@@ -199,7 +201,8 @@
   .workspace { height: auto; min-height: 100dvh; }
   .workspace-main { grid-template-columns: minmax(0, 1fr); height: auto; }
   .stage .video-player { width: 100%; }
-  .sidebar { grid-template-rows: auto auto; }
+  .sidebar,
+  .sidebar--replay { grid-template-rows: auto auto; }
   .sidebar__stats { min-height: 360px; }
   .side-stack[data-view='coach'] .side-stack__pane--coach { min-height: min(640px, 85dvh); }
   .side-stack[data-view='analysis'] .side-stack__pane--coach,

@@ -529,7 +529,8 @@
 .shot-log__player span { overflow: hidden; text-overflow: ellipsis; }
 .shot-log li:not(.is-past) .swatch { opacity: 0.5; }
 .shot-log li > strong { font-variant-numeric: tabular-nums; font-weight: 650; }
-.shot-log__empty { margin: 0; color: var(--text-2); font-size: var(--fs-13); }
+.shot-log__empty,
+.replay3d-loading { margin: 0; color: var(--text-2); font-size: var(--fs-13); }
 
 /* ---------- Theme toggle ---------- */
 

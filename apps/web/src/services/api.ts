@@ -1,3 +1,5 @@
+import type { MeasuredCourtColors } from '../lib/courtColors.ts'
+
 export interface ProcessMatchRequest {
   sourceUrl: string
   title?: string
@@ -59,7 +61,13 @@ export interface HitEvent {
 export interface MatchTelemetry {
   version: number
   video: { fps: number | null; width: number; height: number; frame_count: number }
-  court: { length_meters: number; width_meters: number; calibrated: boolean }
+  court: {
+    length_meters: number
+    width_meters: number
+    calibrated: boolean
+    /** Colours measured on the video; absent for videos the vision service could not read them from. */
+    colors?: MeasuredCourtColors
+  }
   frames: FrameTelemetry[]
   events: { bounces: BounceEvent[]; hits: HitEvent[] }
 }

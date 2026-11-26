@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 import library
+from court_colors import with_court_colors
 
 
 def run_pipeline(*args, **kwargs):
@@ -132,6 +133,7 @@ async def process_video(request: ProcessVideoRequest):
     if video_path is not None:
         processed_videos[request.matchId] = (video_path, telemetry["video"]["frame_count"])
     library.write_match_metadata(output_dir, request.title, "url")
+    telemetry = await asyncio.to_thread(with_court_colors, output_dir, telemetry, video_path)
     return {
         "matchId": request.matchId,
         "telemetry": telemetry,
@@ -183,6 +185,7 @@ async def process_video_upload(
 
     processed_videos[match_id] = (video_path, telemetry["video"]["frame_count"])
     library.write_match_metadata(output_dir, unquote(title) if title else None, "upload")
+    telemetry = await asyncio.to_thread(with_court_colors, output_dir, telemetry, video_path)
     return {"matchId": match_id, "telemetry": telemetry}
 
 
@@ -225,15 +228,18 @@ async def list_library_matches():
 async def open_library_match(match_id: str):
     """Returns a stored analysis and re-registers its video so it can be played and inspected."""
     folder = get_library_folder(match_id)
+    video_path = library.find_video(folder)
     try:
         summary, telemetry = await asyncio.to_thread(
-            lambda: (library.summarize_match(folder), library.read_telemetry(folder))
+            lambda: (
+                library.summarize_match(folder),
+                with_court_colors(folder, library.read_telemetry(folder), video_path),
+            )
         )
     except (OSError, ValueError):
         raise HTTPException(status_code=500, detail="La telemetria guardada no se puede leer.")
     if summary is None:
         raise HTTPException(status_code=500, detail="La telemetria guardada no se puede leer.")
-    video_path = library.find_video(folder)
     if video_path is not None:
         processed_videos[folder.name] = (video_path, telemetry["video"]["frame_count"])
     return {"matchId": folder.name, "title": summary["title"], "telemetry": telemetry}

@@ -1,0 +1,150 @@
+.replay3d { display: grid; gap: var(--s-3); }
+
+/* The scene keeps the broadcast stage colour in both themes, like the video and the court map. */
+.replay3d__stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: #050b15;
+  aspect-ratio: 5 / 4;
+  min-height: 240px;
+  max-height: 58vh;
+  touch-action: none;
+}
+
+/* Full screen (browser API) or, where it is missing, covering the window. */
+.replay3d__stage:fullscreen,
+.replay3d__stage.is-expanded {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: auto;
+}
+
+.replay3d__stage.is-expanded { position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100dvh; }
+
+.replay3d__stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.replay3d__stage canvas:active { cursor: grabbing; }
+
+.replay3d__views {
+  position: absolute;
+  top: var(--s-2);
+  left: var(--s-2);
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid rgb(238 242 246 / 0.16);
+  border-radius: 7px;
+  padding: 2px;
+  background: rgb(5 11 21 / 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.replay3d__views button {
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 9px;
+  background: transparent;
+  color: #b7c2d2;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.replay3d__views button:hover { color: #eef2f6; }
+.replay3d__views button[aria-pressed='true'] { background: rgb(238 242 246 / 0.14); color: #eef2f6; }
+.replay3d__views button:focus-visible { outline: 2px solid #5cc8f2; outline-offset: 1px; }
+
+.replay3d__size {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(238 242 246 / 0.16);
+  border-radius: 7px;
+  background: rgb(5 11 21 / 0.72);
+  backdrop-filter: blur(6px);
+  color: #b7c2d2;
+  cursor: pointer;
+}
+
+.replay3d__size:hover { color: #eef2f6; }
+.replay3d__size:focus-visible { outline: 2px solid #5cc8f2; outline-offset: 1px; }
+
+.replay3d__hint {
+  position: absolute;
+  right: var(--s-2);
+  bottom: var(--s-2);
+  color: rgb(238 242 246 / 0.55);
+  font-size: var(--fs-11);
+  pointer-events: none;
+}
+
+.replay3d__fallback {
+  display: grid;
+  place-items: center;
+  gap: var(--s-2);
+  height: 100%;
+  margin: 0;
+  padding: var(--s-4);
+  color: #b7c2d2;
+  font-size: var(--fs-13);
+  text-align: center;
+}
+
+.replay3d__shot { border: 1px solid var(--rule); border-radius: 8px; padding: var(--s-3); }
+
+.replay3d__shot header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  margin-bottom: var(--s-3);
+  font-size: var(--fs-13);
+}
+
+.replay3d__shot header span { overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.replay3d__shot header .replay3d__shot-time { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.replay3d__shot dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-2); margin: 0; }
+.replay3d__shot dt { color: var(--text-2); font-size: var(--fs-11); white-space: nowrap; }
+.replay3d__shot dd { margin: 2px 0 0; font-size: var(--fs-13); font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+
+.replay3d__idle,
+.replay3d__note { margin: 0; color: var(--text-2); font-size: var(--fs-12); }
+
+.replay3d__list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+
+.replay3d__list button {
+  display: grid;
+  grid-template-columns: 18px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px var(--s-2);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+}
+
+.replay3d__list button:hover { background: var(--surface-2); color: var(--text); }
+.replay3d__list button[aria-current='step'] { background: var(--surface-2); color: var(--text); }
+.replay3d__list button:focus-visible { outline: 2px solid var(--rule-strong); outline-offset: -2px; }
+.replay3d__list-index { font-family: var(--font-mono); font-size: var(--fs-11); }
+.replay3d__list-type { font-weight: 650; }
+.replay3d__list strong { font-variant-numeric: tabular-nums; font-weight: 650; }
+
+@media (max-width: 420px) {
+  .replay3d__shot dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .replay3d__hint { display: none; }
+}

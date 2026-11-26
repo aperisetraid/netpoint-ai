@@ -66,7 +66,13 @@ export interface HitEvent {
 export interface MatchTelemetry {
   version: number;
   video: { fps: number | null; width: number; height: number; frame_count: number };
-  court: { length_meters: number; width_meters: number; calibrated: boolean };
+  court: {
+    length_meters: number;
+    width_meters: number;
+    calibrated: boolean;
+    /** Colours measured on the video (surface inside the lines, surround outside); absent when unknown. */
+    colors?: { surface: string; surround?: string };
+  };
   frames: FrameTelemetry[];
   events: { bounces: BounceEvent[]; hits: HitEvent[] };
 }

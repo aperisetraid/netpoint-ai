@@ -1,5 +1,6 @@
 import { Radar } from 'lucide-react'
 
+import { courtFill, type MeasuredCourtColors } from '../../lib/courtColors.ts'
 import { formatTime } from '../../lib/format.ts'
 import type { BounceEvent, FrameTelemetry } from '../../services/api'
 import type { PlayerNames } from '../ingest/PlayerNamesDialog'
@@ -10,6 +11,8 @@ interface CourtMapProps {
   /** Bounces that have already happened at the current playback time. */
   bounces: BounceEvent[]
   playerNames: PlayerNames
+  /** Real court colours measured on the video; the default hard court without them. */
+  colors?: MeasuredCourtColors
 }
 
 const courtLength = 23.77
@@ -21,7 +24,8 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value))
 }
 
-function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps, 'hasAnalysis'>) {
+function CourtVisualization({ frame, bounces, playerNames, colors }: Omit<CourtMapProps, 'hasAnalysis'>) {
+  const fill = courtFill(colors)
   const players = frame?.detections.filter(
     (detection) => detection.class === 'player' && detection.x_meters !== null && detection.y_meters !== null,
   ) ?? []
@@ -30,6 +34,7 @@ function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps,
     <svg
       viewBox="-60 -80 1217 2537"
       className="court-map__svg"
+      style={{ '--court': fill.court, '--court-outer': fill.courtOuter } as React.CSSProperties}
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label={`Mapa vertical de la pista y posiciones del frame ${frame?.frame_index ?? 0}`}
@@ -81,7 +86,7 @@ function CourtVisualization({ frame, bounces, playerNames }: Omit<CourtMapProps,
 }
 
 /** Top-down court with the players of the current frame and the bounces played so far. */
-export function CourtMap({ hasAnalysis, frame, bounces, playerNames }: CourtMapProps) {
+export function CourtMap({ hasAnalysis, frame, bounces, playerNames, colors }: CourtMapProps) {
   return (
     <section className="court-card panel" aria-labelledby="court-card-title">
       <div className="court-card__heading">
@@ -95,7 +100,7 @@ export function CourtMap({ hasAnalysis, frame, bounces, playerNames }: CourtMapP
       <div className="court-map-stage">
         {hasAnalysis ? (
           <>
-            <CourtVisualization frame={frame} bounces={bounces} playerNames={playerNames} />
+            <CourtVisualization frame={frame} bounces={bounces} playerNames={playerNames} colors={colors} />
             <div className="court-legend">
               <ul aria-label="Leyenda">
                 <li><i className="swatch swatch--far" aria-hidden="true" /> {playerNames.far || 'Fondo'}</li>
