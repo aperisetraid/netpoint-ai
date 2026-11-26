@@ -11,7 +11,6 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 import library
-from coach.api import create_coach_router
 
 
 def run_pipeline(*args, **kwargs):
@@ -203,7 +202,11 @@ def resolve_analysis_folder(match_id: str) -> Path | None:
     return None
 
 
-app.include_router(create_coach_router(resolve_analysis_folder))
+# The read-only demo has no coach: it would bill its owner's Anthropic key (and needs the SDK installed).
+if not read_only:
+    from coach.api import create_coach_router
+
+    app.include_router(create_coach_router(resolve_analysis_folder))
 
 
 def get_library_folder(match_id: str) -> Path:

@@ -85,9 +85,6 @@
 .coach-notice { margin: 0 0 var(--s-4); }
 .coach-notice p { margin: 0; }
 .coach-notice code { font-size: var(--fs-12); }
-.coach-access__body { display: flex; flex: 1; flex-direction: column; gap: var(--s-2); min-width: 0; }
-.coach-access__row { display: flex; gap: var(--s-2); }
-.coach-access__row .field__control { flex: 1; min-width: 0; }
 
 /* ---------- Intro (empty conversation) ---------- */
 

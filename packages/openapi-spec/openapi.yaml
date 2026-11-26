@@ -224,13 +224,9 @@ paths:
     delete:
       summary: Reiniciar la conversación con el coach
       operationId: resetCoachSession
-      parameters:
-        - $ref: '#/components/parameters/AccessCode'
       responses:
         '204':
           description: Conversación eliminada.
-        '401':
-          $ref: '#/components/responses/401AccessCode'
         '404':
           $ref: '#/components/responses/404NotFound'
         '409':
@@ -253,8 +249,6 @@ paths:
         - `error` (`message`): el turno falló y no se guardó nada.
         Los instantes del vídeo se citan en Markdown como `[m:ss](#t=SEGUNDOS)`.
       operationId: postCoachMessage
-      parameters:
-        - $ref: '#/components/parameters/AccessCode'
       requestBody:
         required: true
         content:
@@ -270,16 +264,12 @@ paths:
                 type: string
         '400':
           $ref: '#/components/responses/400BadRequest'
-        '401':
-          $ref: '#/components/responses/401AccessCode'
         '404':
           $ref: '#/components/responses/404NotFound'
         '409':
           $ref: '#/components/responses/409Conflict'
         '422':
           $ref: '#/components/responses/422Unprocessable'
-        '429':
-          $ref: '#/components/responses/429DailyLimit'
         '502':
           $ref: '#/components/responses/502BadGateway'
 
@@ -700,9 +690,6 @@ components:
         available:
           type: boolean
           description: Hay credenciales de Anthropic configuradas en el servicio de visión.
-        accessRequired:
-          type: boolean
-          description: El coach exige la cabecera `X-Access-Code` (despliegue público con `NETPOINT_COACH_ACCESS_CODE`).
         model:
           type: string
           example: "claude-opus-5-5"
@@ -738,23 +725,10 @@ components:
       schema:
         type: string
         format: uuid
-    AccessCode:
-      name: X-Access-Code
-      in: header
-      required: false
-      schema:
-        type: string
-      description: Código de acceso del coach. Obligatorio solo si la sesión indica `accessRequired`.
 
   responses:
     400BadRequest:
       description: Solicitud incorrecta o parámetros faltantes.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    401AccessCode:
-      description: Falta el código de acceso del coach o no es correcto.
       content:
         application/json:
           schema:
@@ -779,12 +753,6 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     502BadGateway:
       description: El servicio de visión no pudo procesar el vídeo.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    429DailyLimit:
-      description: Se alcanzó el límite diario de mensajes del coach (`NETPOINT_COACH_DAILY_LIMIT`).
       content:
         application/json:
           schema:

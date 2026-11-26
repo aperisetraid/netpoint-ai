@@ -129,6 +129,7 @@ function App() {
             onHome={() => setView('landing')}
             onLibrary={() => setView('library')}
             allowNewAnalysis={!demoMode}
+            showCoach={!demoMode}
           />
 
           {/* Floating source menu: it overlays the workspace instead of taking vertical space. */}
@@ -174,16 +175,18 @@ function App() {
                   playerNames={playerNames}
                 />
               </div>
-              <div className="side-stack__pane side-stack__pane--coach" inert={!coachOpen || analysis === null}>
-                <CoachPanel
-                  matchId={isSubmitting ? null : analysis?.matchId ?? null}
-                  playerNames={playerNames}
-                  currentTime={currentTime}
-                  hasVideo={analysis !== null}
-                  onSeek={seekVideo}
-                  onClose={() => setCoachOpen(false)}
-                />
-              </div>
+              {demoMode ? null : (
+                <div className="side-stack__pane side-stack__pane--coach" inert={!coachOpen || analysis === null}>
+                  <CoachPanel
+                    matchId={isSubmitting ? null : analysis?.matchId ?? null}
+                    playerNames={playerNames}
+                    currentTime={currentTime}
+                    hasVideo={analysis !== null}
+                    onSeek={seekVideo}
+                    onClose={() => setCoachOpen(false)}
+                  />
+                </div>
+              )}
             </div>
           </div>
           <ProcessingOverlay active={isSubmitting} progress={progress} />

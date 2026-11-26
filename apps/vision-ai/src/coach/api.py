@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
-import os
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,48 +23,6 @@ from .session import delete_session, load_session
 
 TELEMETRY_FILE = "telemetry_output.json"
 MODEL_CACHE_SIZE = 6
-# A public deployment pays for every turn with its own Anthropic key: an access code keeps strangers
-# out and a daily cap bounds the bill. Both are off unless their environment variable is set.
-ACCESS_CODE_ENV = "NETPOINT_COACH_ACCESS_CODE"
-DAILY_LIMIT_ENV = "NETPOINT_COACH_DAILY_LIMIT"
-WRONG_CODE_MESSAGE = "Código de acceso del coach incorrecto."
-DAILY_LIMIT_MESSAGE = "Se ha alcanzado el límite diario de mensajes del coach. Vuelve a intentarlo mañana."
-
-
-def access_code() -> str | None:
-    return os.environ.get(ACCESS_CODE_ENV) or None
-
-
-def require_access(provided: str | None) -> None:
-    expected = access_code()
-    if expected is not None and not hmac.compare_digest((provided or "").encode(), expected.encode()):
-        raise HTTPException(status_code=401, detail=WRONG_CODE_MESSAGE)
-
-
-class DailyLimit:
-    """Turns started per UTC day across every match; kept in memory, so a restart resets it."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._day: str | None = None
-        self._count = 0
-
-    def take(self) -> bool:
-        raw = os.environ.get(DAILY_LIMIT_ENV)
-        if not raw:
-            return True
-        limit = int(raw)
-        today = datetime.now(timezone.utc).date().isoformat()
-        with self._lock:
-            if self._day != today:
-                self._day, self._count = today, 0
-            if self._count >= limit:
-                return False
-            self._count += 1
-            return True
-
-
-daily_limit = DailyLimit()
 
 
 class PlayerNamesInput(BaseModel):
@@ -182,7 +137,6 @@ def create_coach_router(resolve_folder: Callable[[str], Path | None]) -> APIRout
         session = await asyncio.to_thread(load_session, folder, context.fingerprint)
         return {
             "available": agent.credentials_configured(),
-            "accessRequired": access_code() is not None,
             "model": agent.MODEL,
             "messages": [asdict(entry) for entry in session.transcript],
             "highlights": build_highlights(context.model),
@@ -191,19 +145,12 @@ def create_coach_router(resolve_folder: Callable[[str], Path | None]) -> APIRout
         }
 
     @router.post("/{match_id}/messages")
-    async def post_coach_message(
-        match_id: str,
-        request: CoachMessageRequest,
-        x_access_code: Annotated[str | None, Header(alias="X-Access-Code")] = None,
-    ):
-        require_access(x_access_code)
+    async def post_coach_message(match_id: str, request: CoachMessageRequest):
         folder = folder_for(match_id)
         context = await context_for(folder)
         key = folder.resolve()
         if key in _busy:
             raise HTTPException(status_code=409, detail="El coach todavía está respondiendo en este partido.")
-        if not daily_limit.take():
-            raise HTTPException(status_code=429, detail=DAILY_LIMIT_MESSAGE)
         session = await asyncio.to_thread(load_session, folder, context.fingerprint)
         turn = agent.TurnRequest(
             question=request.message.strip(),
@@ -227,11 +174,7 @@ def create_coach_router(resolve_folder: Callable[[str], Path | None]) -> APIRout
         )
 
     @router.delete("/{match_id}", status_code=204)
-    async def reset_coach_session(
-        match_id: str,
-        x_access_code: Annotated[str | None, Header(alias="X-Access-Code")] = None,
-    ):
-        require_access(x_access_code)
+    async def reset_coach_session(match_id: str):
         folder = folder_for(match_id)
         if folder.resolve() in _busy:
             raise HTTPException(status_code=409, detail="Espera a que el coach termine de responder.")

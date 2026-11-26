@@ -1,4 +1,7 @@
 import asyncio
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -204,6 +207,20 @@ class FrameInspectionTests(unittest.TestCase):
                 self.assertEqual(caught.exception.status_code, 503)
                 self.assertEqual(caught.exception.headers, {"X-NetPoint-Read-Only": "1"})
         pipeline.assert_not_called()
+
+    def test_read_only_deployment_has_no_coach(self):
+        # The router is mounted at import time, so each mode needs a fresh interpreter.
+        script = "import server; print(any(path.startswith('/coach') for path in server.app.openapi()['paths']))"
+        for flag, expected in (("1", "False"), ("", "True")):
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=Path(__file__).parent,
+                env={**os.environ, "NETPOINT_READ_ONLY": flag},
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual(result.stdout.strip(), expected)
 
     def test_video_progress_endpoint_returns_current_frame_count(self):
         server.progress_by_match["progress-test"] = {

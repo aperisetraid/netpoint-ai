@@ -40,3 +40,6 @@ apps/vision-ai/benchmarks/*.timing.json
 
 # Partidos que se publican en la demo (vídeos de emisiones: no van a Git)
 apps/vision-ai/deploy-library/
+
+# Presentations (contain broadcast screenshots)
+*.pptx

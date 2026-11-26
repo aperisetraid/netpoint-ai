@@ -67,7 +67,7 @@ export function CoachPanel({ matchId, playerNames, currentTime, hasVideo, onSeek
     currentTime: hasVideo ? currentTime : null,
   }))
   const { session, messages, draft, isStreaming } = chat
-  const canAsk = Boolean(matchId && session?.available && !isStreaming && !chat.needsAccessCode)
+  const canAsk = Boolean(matchId && session?.available && !isStreaming)
 
   function choosePerspective(next: CoachPerspective) {
     const value = perspective === next ? null : next
@@ -173,9 +173,6 @@ export function CoachPanel({ matchId, playerNames, currentTime, hasVideo, onSeek
           stickToBottom.current = target.scrollHeight - target.scrollTop - target.clientHeight < 80
         }}
       >
-        {session?.available && chat.needsAccessCode ? (
-          <CoachAccessForm refused={chat.accessRefused} onSubmit={chat.submitAccessCode} />
-        ) : null}
         <CoachBody
           matchId={matchId}
           session={session}
@@ -197,13 +194,7 @@ export function CoachPanel({ matchId, playerNames, currentTime, hasVideo, onSeek
             rows={1}
             value={input}
             maxLength={4000}
-            placeholder={
-              !session?.available
-                ? 'El coach no está disponible'
-                : chat.needsAccessCode
-                  ? 'Introduce antes el código de acceso'
-                  : 'Pregunta sobre el partido…'
-            }
+            placeholder={session?.available ? 'Pregunta sobre el partido…' : 'El coach no está disponible'}
             aria-label="Pregunta para el coach"
             disabled={!matchId || !session?.available}
             onChange={(event) => setInput(event.target.value)}
@@ -319,47 +310,6 @@ function CoachBody({ matchId, session, isLoading, loadError, messages, draft, ca
         </ol>
       )}
     </>
-  )
-}
-
-interface CoachAccessFormProps {
-  refused: boolean
-  onSubmit: (code: string) => void
-}
-
-/** The public demo protects the coach (it runs on its owner's Anthropic key) with a shared code. */
-function CoachAccessForm({ refused, onSubmit }: CoachAccessFormProps) {
-  const [code, setCode] = useState('')
-  return (
-    <form
-      className="notice notice--warning coach-notice coach-access"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSubmit(code)
-        setCode('')
-      }}
-    >
-      <KeyRound size={15} aria-hidden="true" />
-      <div className="coach-access__body">
-        <p>
-          {refused
-            ? 'El código no es correcto. Vuelve a introducirlo.'
-            : 'Este coach está protegido. Introduce el código de acceso que te han facilitado.'}
-        </p>
-        <div className="coach-access__row">
-          <input
-            className="field__control"
-            type="password"
-            value={code}
-            autoComplete="off"
-            aria-label="Código de acceso del coach"
-            placeholder="Código de acceso"
-            onChange={(event) => setCode(event.target.value)}
-          />
-          <button type="submit" className="btn btn--primary btn--sm" disabled={!code.trim()}>Desbloquear</button>
-        </div>
-      </div>
-    </form>
   )
 }
 

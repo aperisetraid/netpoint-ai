@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -336,7 +335,6 @@ class CoachApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["messages"], [])
-        self.assertFalse(payload["accessRequired"])
         self.assertEqual(payload["highlights"][0]["label"], "Punto más largo")
         self.assertTrue(payload["suggestions"])
 
@@ -349,24 +347,6 @@ class CoachApiTests(unittest.TestCase):
 
         self.assertEqual(self.client.delete("/coach/m1").status_code, 204)
         self.assertEqual(self.client.get("/coach/m1").json()["messages"], [])
-
-    def test_access_code_and_daily_limit_protect_a_public_coach(self):
-        settings = {api.ACCESS_CODE_ENV: "saque-223", api.DAILY_LIMIT_ENV: "1"}
-        with patch.dict(os.environ, settings), patch.object(api, "daily_limit", api.DailyLimit()):
-            self.assertTrue(self.client.get("/coach/m1").json()["accessRequired"])
-            for headers in ({}, {"X-Access-Code": "otro"}):
-                denied = self.client.post("/coach/m1/messages", json={"message": "Hola"}, headers=headers)
-                self.assertEqual(denied.status_code, 401)
-                self.assertEqual(denied.json()["detail"], api.WRONG_CODE_MESSAGE)
-            self.assertEqual(self.client.delete("/coach/m1").status_code, 401)
-
-            granted = {"X-Access-Code": "saque-223"}
-            with patch.object(agent, "get_client", return_value=FakeClient([text_round("Respuesta")])):
-                streamed = self.client.post("/coach/m1/messages", json={"message": "Hola"}, headers=granted)
-            self.assertEqual(streamed.status_code, 200)
-            capped = self.client.post("/coach/m1/messages", json={"message": "Otra"}, headers=granted)
-            self.assertEqual(capped.status_code, 429)
-            self.assertEqual(self.client.delete("/coach/m1", headers=granted).status_code, 204)
 
     def test_unknown_match_and_invalid_payloads(self):
         self.assertEqual(self.client.get("/coach/otro").status_code, 404)

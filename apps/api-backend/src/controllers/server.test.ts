@@ -563,15 +563,15 @@ test('coach endpoints validate input and map vision errors', async () => {
 });
 
 
-test('a deployment points at VISION_BASE_URL, forwards the coach access code and maps its refusals', async () => {
+test('a deployment points at VISION_BASE_URL and maps the read-only refusal', async () => {
   const matchId = '8b0c1e7a-3f2d-4c55-9a1b-2d3e4f5a6b7c';
   const previous = process.env.VISION_BASE_URL;
   process.env.VISION_BASE_URL = 'https://vision.example.com/';
   const reply = { status: 200, body: '{}' };
-  const calls: Array<{ url: string; accessCode: string | null }> = [];
+  const calls: string[] = [];
   const deployedApp = await buildApp({
-    fetchImpl: async (input, init) => {
-      calls.push({ url: String(input), accessCode: new Headers(init?.headers).get('X-Access-Code') });
+    fetchImpl: async (input) => {
+      calls.push(String(input));
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (reply.status === 503) headers['X-NetPoint-Read-Only'] = '1';
       return new Response(reply.body, { status: reply.status, headers });
@@ -580,7 +580,6 @@ test('a deployment points at VISION_BASE_URL, forwards the coach access code and
   try {
     reply.body = JSON.stringify({
       available: true,
-      accessRequired: true,
       model: 'claude-opus-5-5',
       messages: [],
       highlights: [],
@@ -588,27 +587,8 @@ test('a deployment points at VISION_BASE_URL, forwards the coach access code and
       reportPrompt: 'Informe',
     });
     const session = await deployedApp.inject({ method: 'GET', url: `/api/v1/matches/${matchId}/coach` });
-    assert.equal(session.json().accessRequired, true);
-    assert.equal(calls[0].url, `https://vision.example.com/coach/${matchId}`);
-
-    const post = () =>
-      deployedApp.inject({
-        method: 'POST',
-        url: `/api/v1/matches/${matchId}/coach/messages`,
-        headers: { 'x-access-code': 'saque-223' },
-        payload: { message: 'Hola' },
-      });
-    for (const [status, detail] of [
-      [401, 'Código de acceso del coach incorrecto.'],
-      [429, 'Se ha alcanzado el límite diario de mensajes del coach.'],
-    ] as const) {
-      reply.status = status;
-      reply.body = JSON.stringify({ detail });
-      const refused = await post();
-      assert.equal(refused.statusCode, status);
-      assert.equal(refused.json().message, detail);
-    }
-    assert.equal(calls.at(-1)?.accessCode, 'saque-223');
+    assert.equal(session.statusCode, 200);
+    assert.equal(calls[0], `https://vision.example.com/coach/${matchId}`);
 
     reply.status = 503;
     reply.body = JSON.stringify({ detail: 'El análisis de vídeos nuevos está desactivado en esta demo.' });
@@ -619,7 +599,7 @@ test('a deployment points at VISION_BASE_URL, forwards the coach access code and
     });
     assert.equal(processing.statusCode, 503);
     assert.equal(processing.json().message, 'El análisis de vídeos nuevos está desactivado en esta demo.');
-    assert.equal(calls.at(-1)?.url, 'https://vision.example.com/process-video');
+    assert.equal(calls.at(-1), 'https://vision.example.com/process-video');
   } finally {
     if (previous === undefined) delete process.env.VISION_BASE_URL;
     else process.env.VISION_BASE_URL = previous;

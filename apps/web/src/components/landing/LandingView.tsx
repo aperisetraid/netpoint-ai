@@ -42,7 +42,7 @@ export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLi
 
       <HeroSection onStart={onStart} demo={demo} />
       <HowItWorks />
-      <FeatureGrid />
+      <FeatureGrid demo={demo} />
       {demo ? null : <QuickStart onSelect={onSelectVideo} />}
 
       <footer className="landing-footer">

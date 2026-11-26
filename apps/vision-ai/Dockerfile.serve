@@ -1,5 +1,5 @@
-# Read-only vision service for the public demo: serves stored analyses and the coach.
-# YOLO/PyTorch are not installed, so new videos cannot be analysed (NETPOINT_READ_ONLY=1).
+# Read-only vision service for the public demo: serves stored analyses (video, frames, telemetry).
+# YOLO/PyTorch and the Anthropic SDK are not installed: no new analyses and no coach (NETPOINT_READ_ONLY=1).
 # Build from apps/vision-ai with the matches to publish in ./deploy-library (see DEPLOY.md).
 FROM python:3.12-slim
 

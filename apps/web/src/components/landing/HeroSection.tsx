@@ -42,7 +42,7 @@ export function HeroSection({ onStart, demo = false }: HeroSectionProps) {
       <div className="landing-hero__row">
         <p className="landing-hero__lede">
           {demo
-            ? 'Partidos ya analizados por NetPoint: jugadores, bola y pista localizados, cada bote y cada golpe marcado, y un coach que explica qué pasó y qué entrenar.'
+            ? 'Partidos ya analizados por NetPoint: jugadores, bola y pista localizados, y cada bote y cada golpe marcado sobre el vídeo.'
             : 'Sube un vídeo de tenis. NetPoint localiza a los jugadores, la bola y la pista, marca cada bote y cada golpe, y un coach te explica qué pasó y qué entrenar.'}
         </p>
         <div className="landing-hero__actions">

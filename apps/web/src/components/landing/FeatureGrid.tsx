@@ -42,7 +42,7 @@ function BounceMap() {
 }
 
 /** What the analysis gives you: an asymmetric spread rather than a row of identical cards. */
-export function FeatureGrid() {
+export function FeatureGrid({ demo = false }: { demo?: boolean }) {
   return (
     <section className="landing-section" aria-labelledby="features-title">
       <h2 id="features-title" className="display landing-section__title">Qué obtienes</h2>
@@ -63,6 +63,7 @@ export function FeatureGrid() {
           <div className="spread__copy">
             <h3 className="heading">Un coach que ha visto el partido</h3>
             <p>Pregunta en lenguaje natural. Responde con los datos del análisis y te lleva al momento exacto del vídeo.</p>
+            {demo ? <p>No está activo en esta demo pública: requiere la instalación local.</p> : null}
           </div>
           <figure className="spread-chat" aria-label="Ejemplo de conversación con el coach">
             <p className="spread-chat__question">¿Dónde pierdo más puntos con el revés?</p>

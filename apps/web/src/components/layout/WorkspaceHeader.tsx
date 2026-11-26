@@ -21,13 +21,15 @@ interface WorkspaceHeaderProps {
   onLibrary: () => void
   /** False in the public demo, which only opens stored matches. */
   allowNewAnalysis?: boolean
+  /** False in the public demo, which has no coach. */
+  showCoach?: boolean
 }
 
 const statusLabels = { idle: 'Sin partido', processing: 'Analizando', completed: 'Analizado' } as const
 
 export function WorkspaceHeader({
   title, status, frameCount, theme, sourceOpen, coachOpen, coachEnabled,
-  onThemeChange, onToggleSource, onToggleCoach, onHome, onLibrary, allowNewAnalysis = true,
+  onThemeChange, onToggleSource, onToggleCoach, onHome, onLibrary, allowNewAnalysis = true, showCoach = true,
 }: WorkspaceHeaderProps) {
   return (
     <AppNav
@@ -42,6 +44,7 @@ export function WorkspaceHeader({
       )}
       actions={(
         <>
+          {showCoach ? (
           <button
             type="button"
             className="btn btn--secondary coach-trigger"
@@ -54,6 +57,7 @@ export function WorkspaceHeader({
             <Sparkles size={15} aria-hidden="true" />
             <span>Coach</span>
           </button>
+          ) : null}
           {allowNewAnalysis ? (
           <button
             type="button"
