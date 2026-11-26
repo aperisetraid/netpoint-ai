@@ -183,6 +183,28 @@ class FrameInspectionTests(unittest.TestCase):
             asyncio.run(server.get_match_video("missing"))
         self.assertEqual(caught.exception.status_code, 404)
 
+    def test_library_matches_serve_video_and_frames_without_being_opened_first(self):
+        match_id = "11111111-1111-4111-8111-111111111111"
+        folder = Path(self.directory.name) / match_id
+        folder.mkdir()
+        (folder / "telemetry_output.json").write_text('{"video": {"frame_count": 3}, "frames": []}', encoding="utf-8")
+        (folder / "clip.mp4").write_bytes(self.video_path.read_bytes())
+        with patch.object(server, "match_video_root", Path(self.directory.name)):
+            self.assertEqual(Path(asyncio.run(server.get_match_video(match_id)).path), folder / "clip.mp4")
+            self.assertEqual(asyncio.run(server.get_video_frame(match_id, 2)).media_type, "image/jpeg")
+
+    def test_read_only_deployment_refuses_new_analyses(self):
+        with patch.object(server, "read_only", True), patch.object(server, "run_pipeline") as pipeline:
+            for call in (
+                lambda: server.process_video(server.ProcessVideoRequest(youtubeUrl="https://example.com", matchId="x")),
+                lambda: server.process_video_upload(None, "x", "clip.mp4"),
+            ):
+                with self.assertRaises(server.HTTPException) as caught:
+                    asyncio.run(call())
+                self.assertEqual(caught.exception.status_code, 503)
+                self.assertEqual(caught.exception.headers, {"X-NetPoint-Read-Only": "1"})
+        pipeline.assert_not_called()
+
     def test_video_progress_endpoint_returns_current_frame_count(self):
         server.progress_by_match["progress-test"] = {
             "processedFrames": 25,

@@ -1,8 +1,7 @@
 import type { LibraryMatchResponse, LibraryMatchSummary } from '../domain/match.entity.js';
 import { MatchNotFoundError } from './get-telemetry.usecase.js';
+import { visionUrl } from '../infrastructure/vision-url.js';
 import { isVisionServiceResponse, VisionServiceError } from './process-match.usecase.js';
-
-const VISION_LIBRARY_URL = 'http://localhost:8000/library/matches';
 
 export interface LibraryDependencies {
   fetchImpl?: typeof fetch;
@@ -17,7 +16,7 @@ export class LibraryUseCase {
   }
 
   async list(): Promise<LibraryMatchSummary[]> {
-    const payload = await this.requestJson(VISION_LIBRARY_URL);
+    const payload = await this.requestJson(visionUrl('/library/matches'));
     if (!Array.isArray(payload)) {
       throw new VisionServiceError('The Python vision service returned an invalid library.');
     }
@@ -25,7 +24,7 @@ export class LibraryUseCase {
   }
 
   async get(matchId: string): Promise<LibraryMatchResponse> {
-    const payload = await this.requestJson(`${VISION_LIBRARY_URL}/${encodeURIComponent(matchId)}`, matchId);
+    const payload = await this.requestJson(visionUrl(`/library/matches/${encodeURIComponent(matchId)}`), matchId);
     if (!isVisionServiceResponse(payload) || !('matchId' in payload) || !('title' in payload)) {
       throw new VisionServiceError('The Python vision service returned invalid telemetry.');
     }

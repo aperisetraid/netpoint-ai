@@ -80,6 +80,7 @@ export function QuickStart({ onSelect }: QuickStartProps) {
           </button>
         </div>
 
+        {demoMatches.length ? (
         <div className="landing-demos">
           <h3 className="heading">O prueba con un partido de ejemplo</h3>
           <ul aria-label="Partidos de ejemplo">
@@ -107,6 +108,7 @@ export function QuickStart({ onSelect }: QuickStartProps) {
             })}
           </ul>
         </div>
+        ) : null}
       </div>
 
       {errorMessage ? (

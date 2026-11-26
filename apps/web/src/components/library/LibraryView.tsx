@@ -14,6 +14,8 @@ interface LibraryViewProps {
   onHome: () => void
   /** Goes to the workspace (with the current analysis, if any). */
   onWorkspace: () => void
+  /** False in the public demo, which only opens stored matches. */
+  allowNewAnalysis?: boolean
   /** Loads a stored analysis; rejects when it cannot be read. */
   onOpen: (matchId: string) => Promise<void>
 }
@@ -25,7 +27,7 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 /** Grid of the analyses already stored: pick one to load it without reprocessing the video. */
-export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen }: LibraryViewProps) {
+export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen, allowNewAnalysis = true }: LibraryViewProps) {
   const [matches, setMatches] = useState<LibraryMatch[]>([])
   const [state, setState] = useState<LoadState>('loading')
   const [loadError, setLoadError] = useState('')
@@ -84,11 +86,11 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
             <button type="button" aria-current="page">Biblioteca</button>
           </>
         )}
-        actions={(
+        actions={allowNewAnalysis ? (
           <button type="button" className="btn btn--primary" onClick={onWorkspace}>
             <Plus size={15} aria-hidden="true" /> Nuevo análisis
           </button>
-        )}
+        ) : undefined}
       />
 
       <section className="library-head" aria-labelledby="library-title">
@@ -153,9 +155,11 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen 
           <FolderOpen size={32} strokeWidth={1.4} aria-hidden="true" />
           <h2>Aún no hay partidos analizados</h2>
           <p>Cuando analices un vídeo aparecerá aquí, listo para reabrirlo sin volver a procesarlo.</p>
-          <button type="button" className="btn btn--primary" onClick={onWorkspace}>
-            Analizar un vídeo
-          </button>
+          {allowNewAnalysis ? (
+            <button type="button" className="btn btn--primary" onClick={onWorkspace}>
+              Analizar un vídeo
+            </button>
+          ) : null}
         </div>
       ) : null}
 

@@ -19,13 +19,15 @@ interface WorkspaceHeaderProps {
   onToggleCoach: () => void
   onHome: () => void
   onLibrary: () => void
+  /** False in the public demo, which only opens stored matches. */
+  allowNewAnalysis?: boolean
 }
 
 const statusLabels = { idle: 'Sin partido', processing: 'Analizando', completed: 'Analizado' } as const
 
 export function WorkspaceHeader({
   title, status, frameCount, theme, sourceOpen, coachOpen, coachEnabled,
-  onThemeChange, onToggleSource, onToggleCoach, onHome, onLibrary,
+  onThemeChange, onToggleSource, onToggleCoach, onHome, onLibrary, allowNewAnalysis = true,
 }: WorkspaceHeaderProps) {
   return (
     <AppNav
@@ -52,6 +54,7 @@ export function WorkspaceHeader({
             <Sparkles size={15} aria-hidden="true" />
             <span>Coach</span>
           </button>
+          {allowNewAnalysis ? (
           <button
             type="button"
             className="btn btn--primary source-trigger"
@@ -63,6 +66,7 @@ export function WorkspaceHeader({
             <span>Nuevo análisis</span>
             <ChevronDown size={14} aria-hidden="true" className="source-trigger__chevron" />
           </button>
+          ) : null}
         </>
       )}
     >

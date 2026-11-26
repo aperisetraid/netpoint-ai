@@ -6,7 +6,9 @@ import {
   type CoachSession,
   type CoachTranscriptEntry,
   getCoachSession,
+  loadAccessCode,
   resetCoachSession,
+  saveAccessCode,
   streamCoachMessage,
 } from '../services/coach'
 
@@ -36,10 +38,29 @@ export function useCoachChat(matchId: string | null, getContext: () => Context) 
   const [loadedMatch, setLoadedMatch] = useState(matchId)
   const abortRef = useRef<AbortController | null>(null)
   const contextRef = useRef(getContext)
+  // A protected coach (public demo) needs the code its owner shared; a refused one is asked again.
+  const [accessCode, setAccessCode] = useState(loadAccessCode)
+  const [accessRefused, setAccessRefused] = useState(false)
+  const accessCodeRef = useRef(accessCode)
 
   useEffect(() => {
     contextRef.current = getContext
+    accessCodeRef.current = accessCode
   })
+
+  const refuseAccess = useCallback(() => {
+    saveAccessCode('')
+    setAccessCode('')
+    setAccessRefused(true)
+  }, [])
+
+  const submitAccessCode = useCallback((code: string) => {
+    const value = code.trim()
+    if (!value) return
+    saveAccessCode(value)
+    setAccessCode(value)
+    setAccessRefused(false)
+  }, [])
 
   // Another match: start from a clean slate while its conversation loads.
   if (loadedMatch !== matchId) {
@@ -113,16 +134,17 @@ export function useCoachChat(matchId: string | null, getContext: () => Context) 
             fail(event.message)
             break
         }
-      }, controller.signal)
+      }, controller.signal, accessCodeRef.current || undefined)
       if (!finished) fail('La conexión se cerró antes de terminar la respuesta.')
     } catch (error) {
       if (controller.signal.aborted) fail('Respuesta detenida.')
       else fail(error instanceof ApiError ? error.message : unexpectedError)
+      if (error instanceof ApiError && error.status === 401) refuseAccess()
     } finally {
       abortRef.current = null
       setDraft(null)
     }
-  }, [matchId])
+  }, [matchId, refuseAccess])
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 
@@ -134,12 +156,13 @@ export function useCoachChat(matchId: string | null, getContext: () => Context) 
   const reset = useCallback(async () => {
     if (!matchId || abortRef.current) return
     try {
-      await resetCoachSession(matchId)
+      await resetCoachSession(matchId, accessCodeRef.current || undefined)
       setMessages([])
     } catch (error) {
-      setLoadError(error instanceof ApiError ? error.message : unexpectedError)
+      if (error instanceof ApiError && error.status === 401) refuseAccess()
+      else setLoadError(error instanceof ApiError ? error.message : unexpectedError)
     }
-  }, [matchId])
+  }, [matchId, refuseAccess])
 
   return {
     session,
@@ -148,6 +171,9 @@ export function useCoachChat(matchId: string | null, getContext: () => Context) 
     isLoading,
     loadError,
     isStreaming: draft !== null,
+    needsAccessCode: Boolean(session?.accessRequired) && (!accessCode || accessRefused),
+    accessRefused,
+    submitAccessCode,
     send,
     stop,
     retry,

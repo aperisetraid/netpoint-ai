@@ -2,10 +2,9 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
 import { longRunningFetch } from '../infrastructure/long-running-fetch.js';
+import { visionUrl } from '../infrastructure/vision-url.js';
 import { MatchNotFoundError } from './get-telemetry.usecase.js';
 import { VisionServiceError } from './process-match.usecase.js';
-
-const VISION_COACH_URL = 'http://localhost:8000/coach';
 
 export type CoachPerspective = 'far' | 'near' | 'coach';
 
@@ -16,11 +15,17 @@ export interface CoachMessageRequest {
   currentTime?: number | null;
 }
 
-/** A request the vision service refused for a reason the user can act on (busy, incompatible data). */
+const COACH_REFUSALS = [401, 409, 422, 429] as const;
+export type CoachRefusal = (typeof COACH_REFUSALS)[number];
+
+/**
+ * A request the vision service refused for a reason the user can act on: a missing or wrong access
+ * code, the daily cap, a turn still running or incompatible data.
+ */
 export class CoachRequestError extends Error {
   constructor(
     message: string,
-    readonly status: 409 | 422,
+    readonly status: CoachRefusal,
   ) {
     super(message);
     this.name = 'CoachRequestError';
@@ -43,7 +48,7 @@ export class CoachUseCase {
   }
 
   async getSession(matchId: string): Promise<unknown> {
-    const response = await this.request(matchId, '', { method: 'GET' });
+    const response = await this.request(matchId, '', { method: 'GET' }, undefined);
     try {
       return await response.json();
     } catch {
@@ -51,27 +56,42 @@ export class CoachUseCase {
     }
   }
 
-  async reset(matchId: string): Promise<void> {
-    await this.request(matchId, '', { method: 'DELETE' });
+  async reset(matchId: string, accessCode?: string): Promise<void> {
+    await this.request(matchId, '', { method: 'DELETE' }, accessCode);
   }
 
   /** Opens the coach's event stream; the caller forwards it to the browser as it arrives. */
-  async streamMessage(matchId: string, body: CoachMessageRequest): Promise<Readable> {
-    const response = await this.request(matchId, '/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify(body),
-    });
+  async streamMessage(matchId: string, body: CoachMessageRequest, accessCode?: string): Promise<Readable> {
+    const response = await this.request(
+      matchId,
+      '/messages',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify(body),
+      },
+      accessCode,
+    );
     if (!response.body) {
       throw new VisionServiceError('The Python vision service returned an empty stream.');
     }
     return Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>);
   }
 
-  private async request(matchId: string, path: string, init: RequestInit): Promise<Response> {
+  private async request(
+    matchId: string,
+    path: string,
+    init: RequestInit,
+    accessCode: string | undefined,
+  ): Promise<Response> {
+    const headers = new Headers(init.headers);
+    if (accessCode) headers.set('X-Access-Code', accessCode);
     let response: Response;
     try {
-      response = await this.fetchImpl(`${VISION_COACH_URL}/${encodeURIComponent(matchId)}${path}`, init);
+      response = await this.fetchImpl(visionUrl(`/coach/${encodeURIComponent(matchId)}${path}`), {
+        ...init,
+        headers,
+      });
     } catch {
       throw new VisionServiceError('Could not connect to the Python vision service.');
     }
@@ -82,8 +102,8 @@ export class CoachUseCase {
     if (response.status === 404) {
       throw new MatchNotFoundError(matchId);
     }
-    if (response.status === 409 || response.status === 422) {
-      throw new CoachRequestError(await readDetail(response), response.status);
+    if ((COACH_REFUSALS as readonly number[]).includes(response.status)) {
+      throw new CoachRequestError(await readDetail(response), response.status as CoachRefusal);
     }
     throw new VisionServiceError(`The Python vision service returned status ${response.status}.`);
   }

@@ -20,9 +20,11 @@ const MATCH_PARAMS_SCHEMA = {
 
 const ERROR_RESPONSES = {
   400: ERROR_RESPONSE_SCHEMA,
+  401: ERROR_RESPONSE_SCHEMA,
   404: ERROR_RESPONSE_SCHEMA,
   409: ERROR_RESPONSE_SCHEMA,
   422: ERROR_RESPONSE_SCHEMA,
+  429: ERROR_RESPONSE_SCHEMA,
   502: ERROR_RESPONSE_SCHEMA,
 } as const;
 
@@ -48,6 +50,7 @@ const COACH_SESSION_SCHEMA = {
       required: ['available', 'model', 'messages', 'highlights', 'suggestions', 'reportPrompt'],
       properties: {
         available: { type: 'boolean' },
+        accessRequired: { type: 'boolean' },
         model: { type: 'string' },
         messages: { type: 'array', items: TRANSCRIPT_ENTRY_SCHEMA },
         highlights: {
@@ -105,6 +108,12 @@ interface MatchParams {
   matchId: string;
 }
 
+/** Access code the browser sends for a protected coach; forwarded to the vision service untouched. */
+function accessCodeOf(request: FastifyRequest): string | undefined {
+  const value = request.headers['x-access-code'];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
 export class CoachController {
   readonly sessionSchema = COACH_SESSION_SCHEMA;
 
@@ -125,7 +134,11 @@ export class CoachController {
     reply: FastifyReply,
   ): Promise<void> {
     await this.handle(reply, async () => {
-      const stream = await this.coachUseCase.streamMessage(request.params.matchId, request.body);
+      const stream = await this.coachUseCase.streamMessage(
+        request.params.matchId,
+        request.body,
+        accessCodeOf(request),
+      );
       // Stop generating upstream when the browser goes away. (The request's own 'close' fires as soon
       // as its body is read, so the response is the reliable signal for a dropped connection.)
       reply.raw.on('close', () => {
@@ -142,7 +155,7 @@ export class CoachController {
 
   async reset(request: FastifyRequest<{ Params: MatchParams }>, reply: FastifyReply): Promise<void> {
     await this.handle(reply, async () => {
-      await this.coachUseCase.reset(request.params.matchId);
+      await this.coachUseCase.reset(request.params.matchId, accessCodeOf(request));
       await reply.status(204).send();
     });
   }

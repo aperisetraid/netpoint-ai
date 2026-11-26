@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 
 import { longRunningFetch } from '../infrastructure/long-running-fetch.js';
+import { visionUrl } from '../infrastructure/vision-url.js';
 import type {
   MatchProgressResponse,
   MatchProcessRequest,
@@ -10,10 +11,6 @@ import type {
   MatchTelemetry,
 } from '../domain/match.entity.js';
 
-const VISION_SERVICE_URL = 'http://localhost:8000/process-video';
-const VISION_UPLOAD_URL = 'http://localhost:8000/process-upload';
-const VISION_PROGRESS_URL = 'http://localhost:8000/matches';
-
 interface VisionServiceResponse {
   telemetry: MatchTelemetry;
 }
@@ -21,6 +18,25 @@ interface VisionServiceResponse {
 interface VisionServiceProgress {
   processedFrames: number;
   totalFrames: number | null;
+}
+
+/** The vision service is deployed without the pipeline (read-only demo) and refuses new analyses. */
+export class ProcessingDisabledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProcessingDisabledError';
+  }
+}
+
+async function processingDisabled(response: Response): Promise<ProcessingDisabledError> {
+  let message = 'New analyses are disabled in this deployment.';
+  try {
+    const payload = (await response.json()) as { detail?: unknown };
+    if (typeof payload.detail === 'string') message = payload.detail;
+  } catch {
+    // Keep the generic message.
+  }
+  return new ProcessingDisabledError(message);
 }
 
 export class VisionServiceError extends Error {
@@ -92,7 +108,7 @@ export class ProcessMatchUseCase {
     let response: Response;
 
     try {
-      response = await this.fetchImpl(VISION_SERVICE_URL, {
+      response = await this.fetchImpl(visionUrl('/process-video'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ youtubeUrl: request.sourceUrl, matchId, title: request.title }),
@@ -101,6 +117,9 @@ export class ProcessMatchUseCase {
       throw new VisionServiceError('Could not connect to the Python vision service.');
     }
 
+    if (response.status === 503 && response.headers.get('X-NetPoint-Read-Only') === '1') {
+      throw await processingDisabled(response);
+    }
     if (!response.ok) {
       throw new VisionServiceError(
         `The Python vision service returned status ${response.status}.`,
@@ -126,7 +145,7 @@ export class ProcessMatchUseCase {
     let response: Response;
 
     try {
-      response = await this.fetchImpl(VISION_UPLOAD_URL, {
+      response = await this.fetchImpl(visionUrl('/process-upload'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -141,6 +160,9 @@ export class ProcessMatchUseCase {
       throw new VisionServiceError('Could not connect to the Python vision service.');
     }
 
+    if (response.status === 503 && response.headers.get('X-NetPoint-Read-Only') === '1') {
+      throw await processingDisabled(response);
+    }
     if (!response.ok) {
       throw new VisionServiceError(
         `The Python vision service returned status ${response.status}.`,
@@ -170,7 +192,7 @@ export class ProcessMatchUseCase {
     let response: Response;
     try {
       response = await this.fetchImpl(
-        `${VISION_PROGRESS_URL}/${encodeURIComponent(matchId)}/progress`,
+        visionUrl(`/matches/${encodeURIComponent(matchId)}/progress`),
       );
     } catch {
       throw new VisionServiceError('Could not connect to the Python vision service.');

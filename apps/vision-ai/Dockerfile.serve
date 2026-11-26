@@ -1,0 +1,19 @@
+# Read-only vision service for the public demo: serves stored analyses and the coach.
+# YOLO/PyTorch are not installed, so new videos cannot be analysed (NETPOINT_READ_ONLY=1).
+# Build from apps/vision-ai with the matches to publish in ./deploy-library (see DEPLOY.md).
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    NETPOINT_READ_ONLY=1 \
+    NETPOINT_LIBRARY_DIR=/data/matches
+
+WORKDIR /app
+COPY requirements-serve.txt .
+RUN pip install --no-cache-dir -r requirements-serve.txt
+
+COPY src/ src/
+COPY deploy-library/ /data/matches/
+
+EXPOSE 8000
+CMD ["sh", "-c", "exec uvicorn server:app --app-dir src --host 0.0.0.0 --port ${PORT:-8000}"]

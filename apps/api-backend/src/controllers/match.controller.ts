@@ -4,7 +4,11 @@ import type { Readable } from 'node:stream';
 import type { MatchProcessRequest } from '../domain/match.entity.js';
 import { MatchNotFoundError, GetTelemetryUseCase } from '../use-cases/get-telemetry.usecase.js';
 import { LibraryUseCase } from '../use-cases/library.usecase.js';
-import { ProcessMatchUseCase, VisionServiceError } from '../use-cases/process-match.usecase.js';
+import {
+  ProcessingDisabledError,
+  ProcessMatchUseCase,
+  VisionServiceError,
+} from '../use-cases/process-match.usecase.js';
 
 const DETECTION_SCHEMA = {
   type: 'object',
@@ -178,6 +182,14 @@ const PROCESS_MATCH_SCHEMA = {
         matchId: { type: 'string' },
         status: { type: 'string', enum: ['completed'] },
         telemetry: MATCH_TELEMETRY_OBJECT_SCHEMA,
+      },
+    },
+    503: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['message'],
+      properties: {
+        message: { type: 'string' },
       },
     },
     502: {
@@ -359,6 +371,10 @@ export class MatchController {
       const response = await this.dependencies.processMatchUseCase.execute(request.body);
       await reply.status(200).send(response);
     } catch (error) {
+      if (error instanceof ProcessingDisabledError) {
+        await reply.status(503).send({ message: error.message });
+        return;
+      }
       if (error instanceof VisionServiceError) {
         await reply.status(502).send({ message: error.message });
         return;
@@ -414,6 +430,10 @@ export class MatchController {
       });
       await reply.status(200).send(response);
     } catch (error) {
+      if (error instanceof ProcessingDisabledError) {
+        await reply.status(503).send({ message: error.message });
+        return;
+      }
       if (error instanceof VisionServiceError) {
         await reply.status(502).send({ message: error.message });
         return;

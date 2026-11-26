@@ -22,6 +22,8 @@ export interface CoachHighlight {
 
 export interface CoachSession {
   available: boolean
+  /** The deployment protects the coach with an access code. */
+  accessRequired?: boolean
   model: string
   messages: CoachTranscriptEntry[]
   highlights: CoachHighlight[]
@@ -44,6 +46,30 @@ export type CoachStreamEvent =
   | { type: 'error'; message: string }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '')
+
+const accessCodeStorageKey = 'netpoint-coach-access-code'
+
+/** Access code remembered in this browser; empty when none was given or storage is unavailable. */
+export function loadAccessCode(): string {
+  try {
+    return window.localStorage.getItem(accessCodeStorageKey) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function saveAccessCode(code: string): void {
+  try {
+    if (code) window.localStorage.setItem(accessCodeStorageKey, code)
+    else window.localStorage.removeItem(accessCodeStorageKey)
+  } catch {
+    // Storage may be unavailable (private mode); the code still applies to this visit.
+  }
+}
+
+function accessHeaders(accessCode?: string): Record<string, string> {
+  return accessCode ? { 'X-Access-Code': accessCode } : {}
+}
 
 function coachUrl(matchId: string, path = ''): string {
   return `${apiBaseUrl}/api/v1/matches/${encodeURIComponent(matchId)}/coach${path}`
@@ -74,8 +100,8 @@ export async function getCoachSession(matchId: string, signal?: AbortSignal): Pr
   return (await response.json()) as CoachSession
 }
 
-export async function resetCoachSession(matchId: string): Promise<void> {
-  const response = await send(coachUrl(matchId), { method: 'DELETE' })
+export async function resetCoachSession(matchId: string, accessCode?: string): Promise<void> {
+  const response = await send(coachUrl(matchId), { method: 'DELETE', headers: accessHeaders(accessCode) })
   if (!response.ok) throw await failure(response)
 }
 
@@ -85,10 +111,11 @@ export async function streamCoachMessage(
   payload: CoachMessagePayload,
   onEvent: (event: CoachStreamEvent) => void,
   signal: AbortSignal,
+  accessCode?: string,
 ): Promise<void> {
   const response = await send(coachUrl(matchId, '/messages'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...accessHeaders(accessCode) },
     body: JSON.stringify(payload),
     signal,
   })

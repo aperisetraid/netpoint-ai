@@ -16,9 +16,11 @@ interface LandingViewProps {
   onSelectVideo: (request: AnalysisRequest) => void
   /** Opens the library of already analysed matches. */
   onLibrary: () => void
+  /** Public read-only demo: no uploads, the library is the way in. */
+  demo?: boolean
 }
 
-export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLibrary }: LandingViewProps) {
+export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLibrary, demo = false }: LandingViewProps) {
   return (
     <div className="landing">
       <AppNav
@@ -27,17 +29,21 @@ export function LandingView({ theme, onThemeChange, onStart, onSelectVideo, onLi
         links={(
           <>
             <a href="#como-funciona">Cómo funciona</a>
-            <a href="#landing-quick-start">Demo</a>
+            {demo ? null : <a href="#landing-quick-start">Demo</a>}
             <button type="button" onClick={onLibrary}>Biblioteca</button>
           </>
         )}
-        actions={<button type="button" className="btn btn--primary" onClick={onStart}>Analizar un vídeo</button>}
+        actions={(
+          <button type="button" className="btn btn--primary" onClick={demo ? onLibrary : onStart}>
+            {demo ? 'Ver partidos analizados' : 'Analizar un vídeo'}
+          </button>
+        )}
       />
 
-      <HeroSection onStart={onStart} />
+      <HeroSection onStart={onStart} demo={demo} />
       <HowItWorks />
       <FeatureGrid />
-      <QuickStart onSelect={onSelectVideo} />
+      {demo ? null : <QuickStart onSelect={onSelectVideo} />}
 
       <footer className="landing-footer">
         <span>NetPoint AI</span>

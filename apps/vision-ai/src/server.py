@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Annotated
 from pathlib import Path
 from urllib.parse import unquote
@@ -11,7 +12,20 @@ from pydantic import BaseModel, Field
 
 import library
 from coach.api import create_coach_router
-from main import process_video_file, run_pipeline
+
+
+def run_pipeline(*args, **kwargs):
+    """Analyses a video by URL. Imported on first use: YOLO and PyTorch are only loaded to process."""
+    from main import run_pipeline as pipeline
+
+    return pipeline(*args, **kwargs)
+
+
+def process_video_file(*args, **kwargs):
+    """Analyses a stored video file; see `run_pipeline` for why the import is deferred."""
+    from main import process_video_file as pipeline
+
+    return pipeline(*args, **kwargs)
 
 
 class ProcessVideoRequest(BaseModel):
@@ -24,7 +38,12 @@ class ProcessVideoRequest(BaseModel):
 app = FastAPI()
 processed_videos: dict[str, tuple[Path, int]] = {}
 progress_by_match: dict[str, dict[str, int | None]] = {}
-match_video_root = Path("./temp/matches")
+match_video_root = Path(os.environ.get("NETPOINT_LIBRARY_DIR") or "./temp/matches")
+# A deployment that only serves stored analyses (no YOLO/PyTorch installed) refuses new ones.
+read_only = os.environ.get("NETPOINT_READ_ONLY") == "1"
+READ_ONLY_MESSAGE = "El análisis de vídeos nuevos está desactivado en esta demo."
+# Tells the API this 503 is the demo refusing new analyses, not the service being down.
+READ_ONLY_HEADERS = {"X-NetPoint-Read-Only": "1"}
 allowed_video_extensions = {".mp4", ".m4v", ".mov", ".avi", ".mkv", ".webm"}
 max_upload_bytes = 1024 * 1024 * 1024
 
@@ -46,6 +65,25 @@ def read_video_frame(video_path: Path, frame_index: int) -> bytes:
         capture.release()
 
 
+def registered_video(match_id: str) -> tuple[Path, int] | None:
+    """Video of an analysis, registering library matches on demand so a restart does not lose them."""
+    video = processed_videos.get(match_id)
+    if video is not None:
+        return video
+    folder = library.resolve_match_dir(match_video_root, match_id)
+    if folder is None:
+        return None
+    video_path = library.find_video(folder)
+    if video_path is None:
+        return None
+    try:
+        frame_count = library.read_telemetry(folder)["video"]["frame_count"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    processed_videos[folder.name] = (video_path, frame_count)
+    return processed_videos[folder.name]
+
+
 def update_match_progress(match_id: str, processed_frames: int, total_frames: int | None):
     progress_by_match[match_id] = {
         "processedFrames": processed_frames,
@@ -62,7 +100,7 @@ def get_match_progress(match_id: str):
 
 @app.get("/matches/{match_id}/frames/{frame_index}")
 async def get_video_frame(match_id: str, frame_index: int = PathParameter(ge=0)):
-    video = processed_videos.get(match_id)
+    video = await asyncio.to_thread(registered_video, match_id)
     if video is None or frame_index >= video[1]:
         raise HTTPException(status_code=404, detail="Fotograma no disponible.")
     image = await asyncio.to_thread(read_video_frame, video[0], frame_index)
@@ -71,7 +109,7 @@ async def get_video_frame(match_id: str, frame_index: int = PathParameter(ge=0))
 
 @app.get("/matches/{match_id}/video")
 async def get_match_video(match_id: str):
-    video = processed_videos.get(match_id)
+    video = await asyncio.to_thread(registered_video, match_id)
     if video is None or not video[0].is_file():
         raise HTTPException(status_code=404, detail="Video no disponible.")
     # FileResponse honours Range requests, which the browser needs to seek.
@@ -80,6 +118,8 @@ async def get_match_video(match_id: str):
 
 @app.post("/process-video")
 async def process_video(request: ProcessVideoRequest):
+    if read_only:
+        raise HTTPException(status_code=503, detail=READ_ONLY_MESSAGE, headers=READ_ONLY_HEADERS)
     output_dir = match_video_root / str(uuid4())
     progress_by_match[request.matchId] = {"processedFrames": 0, "totalFrames": None}
     telemetry = await asyncio.to_thread(
@@ -106,11 +146,13 @@ async def process_video_upload(
     filename: str = Header(alias="X-Video-Filename"),
     title: Annotated[str | None, Header(alias="X-Title")] = None,
 ):
+    if read_only:
+        raise HTTPException(status_code=503, detail=READ_ONLY_MESSAGE, headers=READ_ONLY_HEADERS)
     safe_filename = Path(unquote(filename)).name
     if Path(safe_filename).suffix.lower() not in allowed_video_extensions:
         raise HTTPException(status_code=415, detail="Formato de video no compatible.")
 
-    output_dir = Path("./temp/matches") / str(uuid4())
+    output_dir = match_video_root / str(uuid4())
     output_dir.mkdir(parents=True, exist_ok=True)
     video_path = output_dir / safe_filename
     received_bytes = 0

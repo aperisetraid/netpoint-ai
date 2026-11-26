@@ -1,5 +1,7 @@
 interface HeroSectionProps {
   onStart: () => void
+  /** Public read-only demo: the call to action opens the library. */
+  demo?: boolean
 }
 
 /**
@@ -33,22 +35,25 @@ function CourtScene() {
   )
 }
 
-export function HeroSection({ onStart }: HeroSectionProps) {
+export function HeroSection({ onStart, demo = false }: HeroSectionProps) {
   return (
     <section className="landing-hero" aria-labelledby="landing-title">
       <h1 id="landing-title" className="display landing-hero__title">El partido, leído golpe a golpe.</h1>
       <div className="landing-hero__row">
         <p className="landing-hero__lede">
-          Sube un vídeo de tenis. NetPoint localiza a los jugadores, la bola y la pista, marca cada bote y cada
-          golpe, y un coach te explica qué pasó y qué entrenar.
+          {demo
+            ? 'Partidos ya analizados por NetPoint: jugadores, bola y pista localizados, cada bote y cada golpe marcado, y un coach que explica qué pasó y qué entrenar.'
+            : 'Sube un vídeo de tenis. NetPoint localiza a los jugadores, la bola y la pista, marca cada bote y cada golpe, y un coach te explica qué pasó y qué entrenar.'}
         </p>
         <div className="landing-hero__actions">
           <button type="button" className="btn btn--primary btn--lg" onClick={onStart}>
-            Analizar un vídeo
+            {demo ? 'Ver partidos analizados' : 'Analizar un vídeo'}
           </button>
-          <a className="btn btn--secondary btn--lg" href="#landing-quick-start">
-            Probar una demo
-          </a>
+          {demo ? null : (
+            <a className="btn btn--secondary btn--lg" href="#landing-quick-start">
+              Probar una demo
+            </a>
+          )}
         </div>
       </div>
       <div className="landing-hero__court">

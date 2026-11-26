@@ -12,6 +12,7 @@ import { VideoPlayer, type VideoPlayerHandle } from './components/video/VideoPla
 import { type AnalysisRequest, useMatchAnalysis } from './hooks/useMatchAnalysis'
 import { findFrameAt } from './lib/frameLookup.ts'
 import { getMatchVideoUrl } from './services/api'
+import { demoMode } from './config'
 import './App.css'
 import './Workspace.css'
 
@@ -30,7 +31,8 @@ function App() {
   const { analysis, errorMessage, isSubmitting, progress, start, openSaved } = useMatchAnalysis()
   // Source menu: open by default while there is nothing to show, collapsed once a match is loaded.
   const [sourceOpen, setSourceOpen] = useState<boolean | null>(null)
-  const showSource = !isSubmitting && (sourceOpen ?? (analysis === null || errorMessage !== null))
+  // The public demo never analyses new videos, so the source menu stays closed.
+  const showSource = !demoMode && !isSubmitting && (sourceOpen ?? (analysis === null || errorMessage !== null))
 
   useEffect(() => {
     window.localStorage.setItem('netpoint-theme', theme)
@@ -96,9 +98,10 @@ function App() {
         <LandingView
           theme={theme}
           onThemeChange={setTheme}
-          onStart={() => setView('analysis')}
+          onStart={() => setView(demoMode ? 'library' : 'analysis')}
           onSelectVideo={setPendingRequest}
           onLibrary={() => setView('library')}
+          demo={demoMode}
         />
       ) : view === 'library' ? (
         <LibraryView
@@ -107,6 +110,7 @@ function App() {
           onHome={() => setView('landing')}
           onWorkspace={() => setView('analysis')}
           onOpen={handleOpenSaved}
+          allowNewAnalysis={!demoMode}
         />
       ) : (
       <div className="workspace">
@@ -124,6 +128,7 @@ function App() {
             onToggleCoach={() => setCoachOpen(!coachOpen)}
             onHome={() => setView('landing')}
             onLibrary={() => setView('library')}
+            allowNewAnalysis={!demoMode}
           />
 
           {/* Floating source menu: it overlays the workspace instead of taking vertical space. */}
