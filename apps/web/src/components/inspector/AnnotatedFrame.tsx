@@ -2,11 +2,14 @@ import { useState } from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 
 import { formatPercent } from '../../lib/format.ts'
-import { type FrameTelemetry, getMatchFrameUrl } from '../../services/api'
+import { type FrameTelemetry, getMatchFrameUrl, type PlayerSide } from '../../services/api'
+import type { PlayerNames } from '../ingest/PlayerNamesDialog'
 
 export type InspectionLayer = 'court' | 'player' | 'ball'
 
 const courtHalfMeters = 23.77 / 2
+/** Same fallback as the court map and the stats when the players were not named. */
+const sideLabels: Record<PlayerSide, string> = { far: 'Fondo', near: 'Cámara' }
 
 interface AnnotatedFrameProps {
   matchId: string
@@ -14,10 +17,12 @@ interface AnnotatedFrameProps {
   imageWidth: number
   imageHeight: number
   layers: Record<InspectionLayer, boolean>
+  /** Names given when the video was uploaded; a player without one is labelled generically. */
+  playerNames?: PlayerNames
 }
 
 /** Still image of one analysed frame with its calibration and detections drawn on top. */
-export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers }: AnnotatedFrameProps) {
+export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers, playerNames }: AnnotatedFrameProps) {
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [retry, setRetry] = useState(0)
   const labelSize = imageWidth / 45
@@ -47,14 +52,20 @@ export function AnnotatedFrame({ matchId, frame, imageWidth, imageHeight, layers
             const [left, top, right, bottom] = detection.bbox
             const height = typeof detection.z_meters === 'number' ? ` · ${detection.z_meters.toFixed(1)} m` : ''
             const estimated = detection.carried_forward || detection.interpolated
-            const label = `${detection.class === 'player' ? 'Jugador' : 'Pelota'} ${formatPercent(detection.confidence * 100)}${height}${detection.carried_forward ? ' (previo)' : detection.interpolated ? ' (estimada)' : ''}`
+            // Players take their side's name and colour, as on the court map; unknown positions stay generic.
+            const playerSide: PlayerSide | null = detection.class === 'player' && typeof detection.x_meters === 'number'
+              ? (detection.x_meters < courtHalfMeters ? 'far' : 'near')
+              : null
+            const name = detection.class !== 'player'
+              ? 'Pelota'
+              : playerSide
+                ? playerNames?.[playerSide]?.trim() || sideLabels[playerSide]
+                : 'Jugador'
+            const label = `${name} ${formatPercent(detection.confidence * 100)}${height}${detection.carried_forward ? ' (previo)' : detection.interpolated ? ' (estimada)' : ''}`
             const labelY = Math.max(labelSize * 1.3, top)
             const labelWidth = label.length * labelSize * 0.6
             const labelX = Math.max(0, Math.min(left, imageWidth - labelWidth))
-            // Players take the colour of their side, as on the court map; unknown positions stay neutral.
-            const side = detection.class === 'player' && typeof detection.x_meters === 'number'
-              ? ` frame-overlay__player--${detection.x_meters < courtHalfMeters ? 'far' : 'near'}`
-              : ''
+            const side = playerSide ? ` frame-overlay__player--${playerSide}` : ''
             return (
               <g key={`${detection.class}-${index}`} className={`frame-overlay__${detection.class}${side}`}>
                 <rect x={left} y={top} width={Math.max(0, right - left)} height={Math.max(0, bottom - top)}

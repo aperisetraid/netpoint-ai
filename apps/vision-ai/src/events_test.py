@@ -10,6 +10,7 @@ from events import (
     classify_hits,
     confirm_bounce_kinks,
     detect_bounces,
+    detect_gap_strokes,
     detect_hits,
     detect_vanishing_strokes,
     estimate_ground_speed_kmh,
@@ -677,6 +678,44 @@ class VanishingStrokeTests(unittest.TestCase):
 
     def test_a_ball_that_reappears_on_the_server_side_was_not_served(self):
         self.assertEqual(detect_vanishing_strokes(vanishing_frames((1010, 600, 8.0)), 1920, []), [])
+
+
+def gap_stroke_frames(outgoing_vertical_step):
+    """At 25 fps, a ball comes at the near player, is lost for six frames and is seen again."""
+    player = {"class": "player", "confidence": 0.9, "bbox": [900, 600, 1000, 900], "x_meters": 24.0, "y_meters": 5.0}
+    frames = []
+    for index in range(26):
+        detections = [dict(player)]
+        if index <= 9:
+            x, y = 700 + 15 * index, 300 + 30 * index
+        elif index >= 16:
+            # Sideways the ball turns at frame 13, unseen: 700 + 15 * 13 == 1155 - 20 * 13.
+            x, y = 1155 - 20 * index, 560 + outgoing_vertical_step * (index - 16)
+        else:
+            x = None
+        if x is not None:
+            detections.append({
+                "class": "ball", "confidence": 0.9, "bbox": [x - 3, y - 3, x + 3, y + 3],
+                "x_meters": 20.0, "y_meters": 5.0,
+            })
+        frames.append({"frame_index": index, "timestamp_seconds": index / 25, "detections": detections})
+    return frames
+
+
+class GapStrokeTests(unittest.TestCase):
+    def test_a_stroke_hidden_in_a_gap_is_placed_where_the_sideways_paths_cross(self):
+        frames = gap_stroke_frames(outgoing_vertical_step=-30)
+        stroke, = detect_gap_strokes(frames, [None] * len(frames), 1920, [])
+        self.assertEqual(stroke.frame["frame_index"], 13)
+
+    def test_a_ball_still_coming_at_the_player_after_the_gap_was_not_struck(self):
+        frames = gap_stroke_frames(outgoing_vertical_step=30)
+        self.assertEqual(detect_gap_strokes(frames, [None] * len(frames), 1920, []), [])
+
+    def test_a_gap_next_to_a_hit_already_found_adds_nothing(self):
+        frames = gap_stroke_frames(outgoing_vertical_step=-30)
+        known = collect_ball_samples(frames)[9]
+        self.assertEqual(detect_gap_strokes(frames, [None] * len(frames), 1920, [known]), [])
 
 
 def shot_frame(index, detections):

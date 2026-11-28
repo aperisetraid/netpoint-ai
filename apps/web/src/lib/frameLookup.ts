@@ -23,3 +23,23 @@ export function findFrameAt<Frame extends { timestamp_seconds: number }>(
   }
   return frames[low - 1]
 }
+
+/**
+ * Playback time that shows the frame `step` positions away from `frameIndex` (-1 previous, +1 next),
+ * or null at either end. It is the middle of that frame, not its start: a seek lands a hair before the
+ * requested time, which would show the frame before it.
+ */
+export function frameStepTime<Frame extends { frame_index: number; timestamp_seconds: number }>(
+  frames: Frame[],
+  frameIndex: number,
+  step: number,
+): number | null {
+  const position = frames.findIndex((frame) => frame.frame_index === frameIndex)
+  const target = position + step
+  if (position < 0 || target < 0 || target >= frames.length) return null
+  const start = frames[target].timestamp_seconds
+  const next = frames[target + 1]?.timestamp_seconds
+  const previous = frames[target - 1]?.timestamp_seconds
+  const duration = next !== undefined ? next - start : previous !== undefined ? start - previous : 0
+  return start + duration / 2
+}

@@ -66,6 +66,15 @@ PLAYER_CLING_MIN_END_RUN = 2
 # The net mesh sways and makes the frame-difference detector fire along it, which chains into a
 # slow track running along the net. The ball crosses the net in a few frames, so a track that
 # only that detector sees and that stays on the net in most of its frames is the net itself.
+# Shoes and their shadows light up the colour and motion detectors in bright sun (on grass most
+# of all) and drift with a player along the edge of their box, often just outside it. A tracklet
+# that spends nearly all of its frames at a player's feet is them; the ball only passes by.
+FEET_BAND_TOP_HEIGHTS = 0.2
+FEET_BAND_BOTTOM_HEIGHTS = 0.1
+FEET_BAND_SIDE_WIDTHS = 0.5
+AT_FEET_MIN_FRACTION = 0.8
+# An end point this many frames or more away from the next point of its track is isolated.
+ISOLATED_END_MIN_FRAMES = 2
 NET_POST_OUTSIDE_SINGLES_METERS = 0.914
 NET_POST_HEIGHT_METERS = 1.07
 NET_BAND_MARGIN_PIXELS = 4.0
@@ -220,6 +229,13 @@ class _Stabilizer:
             trailing -= 1
         if end - trailing >= PLAYER_CLING_MIN_END_RUN:
             end = trailing
+        # Growing past a contact the ball was not seen at, the track follows its new direction
+        # back to whatever bright blob lies there, often a shoe. A lone end point at a player's
+        # feet, cut off from the rest by missed frames, is that blob and not the ball.
+        while end - start > 1 and _isolated_at_feet(track[start], track[start + 1], self.frames):
+            start += 1
+        while end - start > 1 and _isolated_at_feet(track[end - 1], track[end - 2], self.frames):
+            end -= 1
         return list(track[start:end])
 
     def runs_along_the_net(self, track: Sequence[BallCandidate]) -> bool:
@@ -330,7 +346,34 @@ def _is_ball_like(track: Sequence[BallCandidate], stabilizer: _Stabilizer, limit
         and _travel([(point.x, point.y) for point in track]) >= limits.min_travel
         and not _moves_with_a_player(track, stabilizer, limits)
         and not stabilizer.runs_along_the_net(track)
+        and not _stays_at_a_players_feet(track, stabilizer.frames)
     )
+
+
+def _at_a_players_feet(point: BallCandidate, frame: dict) -> bool:
+    for detection in frame["detections"]:
+        if detection["class"] != "player":
+            continue
+        left, top, right, bottom = detection["bbox"]
+        height, width = bottom - top, right - left
+        if (
+            left - FEET_BAND_SIDE_WIDTHS * width <= point.x <= right + FEET_BAND_SIDE_WIDTHS * width
+            and bottom - FEET_BAND_TOP_HEIGHTS * height <= point.y <= bottom + FEET_BAND_BOTTOM_HEIGHTS * height
+        ):
+            return True
+    return False
+
+
+def _isolated_at_feet(point: BallCandidate, neighbour: BallCandidate, frames: Sequence[dict]) -> bool:
+    return (
+        abs(neighbour.frame_position - point.frame_position) > ISOLATED_END_MIN_FRAMES
+        and _at_a_players_feet(point, frames[point.frame_position])
+    )
+
+
+def _stays_at_a_players_feet(track: Sequence[BallCandidate], frames: Sequence[dict]) -> bool:
+    at_feet = sum(_at_a_players_feet(point, frames[point.frame_position]) for point in track)
+    return at_feet >= AT_FEET_MIN_FRACTION * len(track)
 
 
 def _moves_with_a_player(track: Sequence[BallCandidate], stabilizer: _Stabilizer, limits: _Limits) -> bool:

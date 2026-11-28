@@ -48,6 +48,13 @@ HIT_BOUNCE_EXCLUSION_SECONDS = 0.1
 HIT_VANISH_WINDOW_SECONDS = 0.5
 HIT_VANISH_MIN_RETURN_RATIO = 0.2
 VANISH_CONTINUATION_WIDTH_RATIO = 0.02
+# A stroke hidden in a stretch where the ball was not seen: at least this many frames unseen,
+# at most this long, with the motion measured over this long on either side.
+GAP_STROKE_MIN_FRAMES = 3
+GAP_STROKE_MAX_SECONDS = 0.8
+GAP_STROKE_WINDOW_SECONDS = 0.3
+# Below this change of sideways image speed the two paths are too parallel to cross reliably.
+GAP_STROKE_MIN_SIDEWAYS_TURN_PIXELS_PER_SECOND = 200.0
 HIT_SHARPEN_SECONDS = 0.06
 HIT_SHARPEN_MIN_CHANGE_RATIO = 2.0
 # YOLO often loses a player for a fraction of a second right at the stroke, when the arm and
@@ -91,6 +98,8 @@ BOUNCE_OUT_MARGIN_METERS = 3.0
 REVERSAL_WINDOW_SECONDS = 0.3
 REVERSAL_MIN_SPEED_METERS_PER_SECOND = 2.0
 TOSS_MIN_SPEED_RATIO = 4.0
+# A toss falls within the server's columns on screen; this much of their width is allowed either side.
+TOSS_COLUMN_MARGIN_RATIO = 0.5
 STROKE_MIN_SPEED_METERS_PER_SECOND = 5.0
 # Arm, racket and a step towards the ball, measured from the player's feet.
 PLAYER_REACH_METERS = 2.5
@@ -404,6 +413,124 @@ def detect_vanishing_strokes(
             continue
         strokes.append(contact)
     return strokes
+
+
+def detect_gap_strokes(
+    frames: Sequence[dict],
+    cameras: Sequence[Camera | None],
+    image_width: float,
+    hits: Sequence[BallSample],
+) -> list[BallSample]:
+    """Strokes played while the ball was out of sight: lost next to a player, seen again leaving them.
+
+    At a low frame rate, or with the ball behind the hitter's body, nothing of the contact is
+    seen and the velocity windows of `detect_hits` find too few samples. The rally still tells
+    it: a ball only changes from coming at a player to going away from them at their racket. A
+    bounce cannot pass for it, since the ball keeps travelling the same way after one: up the
+    image on the far side, down it on the near side.
+    """
+    samples = collect_ball_samples(
+        frames, HIT_MIN_BALL_CONFIDENCE, predicate=lambda ball: not ball.get("interpolated")
+    )
+    steps = sorted(b.time - a.time for a, b in zip(samples, samples[1:]) if b.time > a.time)
+    if not steps:
+        return []
+    frame_seconds = steps[len(steps) // 2]
+    min_speed = image_width * HIT_MIN_DIRECTION_SPEED_WIDTHS_PER_SECOND
+    strokes: list[BallSample] = []
+    for position in range(len(samples) - 1):
+        last_seen, reappeared = samples[position], samples[position + 1]
+        gap = reappeared.time - last_seen.time
+        if gap < GAP_STROKE_MIN_FRAMES * frame_seconds or gap > GAP_STROKE_MAX_SECONDS:
+            continue
+        if any(last_seen.time <= hit.time <= reappeared.time for hit in [*hits, *strokes]):
+            continue
+        before = [s for s in samples[:position + 1] if last_seen.time - s.time <= GAP_STROKE_WINDOW_SECONDS]
+        after = [s for s in samples[position + 1:] if s.time - reappeared.time <= GAP_STROKE_WINDOW_SECONDS]
+        if len(before) < HIT_MIN_WINDOW_SAMPLES or len(after) < HIT_MIN_WINDOW_SAMPLES:
+            continue
+        incoming, outgoing = fit_velocity(before), fit_velocity(after)
+        incoming_speed, outgoing_speed = math.hypot(*incoming), math.hypot(*outgoing)
+        if incoming_speed < min_speed or outgoing_speed < min_speed:
+            continue
+        cosine = (incoming[0] * outgoing[0] + incoming[1] * outgoing[1]) / (incoming_speed * outgoing_speed)
+        if math.degrees(math.acos(max(-1.0, min(1.0, cosine)))) < HIT_MIN_DIRECTION_CHANGE_DEGREES:
+            continue
+        # The racket is where the ball was last seen or where it is seen again, whichever is at
+        # the player it leaves: up the image away from the near player, down it from the far one.
+        contact = None
+        for sample in sorted((last_seen, reappeared), key=_distance_to_hitter):
+            hitter = _find_hitter(sample)
+            if hitter is None or not _within_player_reach(sample):
+                continue
+            away = -1 if side_of(_metric_position(hitter)[0]) == "near" else 1
+            if outgoing[1] * away > 0 and abs(outgoing[1]) >= min_speed:
+                contact = sample
+                break
+        if contact is None:
+            continue
+        hitter = _find_hitter(contact)
+        if _sent_towards_opponent(after, cameras, image_width, contact.time, hitter) is False:
+            continue
+        # Two strokes are never this close: a crossing that lands next to another hit misjudged
+        # the path (a ball going away slows down on screen), and the end where the ball is seen
+        # at the racket is kept instead.
+        for stroke in (_crossing_contact(frames, before, after, contact), contact):
+            if stroke is not None and not any(
+                abs(hit.time - stroke.time) <= HIT_COOLDOWN_SECONDS for hit in [*hits, *strokes]
+            ):
+                strokes.append(stroke)
+                break
+    return strokes
+
+
+def _crossing_contact(
+    frames: Sequence[dict],
+    before: Sequence[BallSample],
+    after: Sequence[BallSample],
+    seen: BallSample,
+) -> BallSample | None:
+    """The contact where the ball's path across the image before and after the gap meet.
+
+    Sideways the image motion is nearly uniform: gravity bends the ball's path up and down the
+    image and a bounce turns it there too, but neither changes how it crosses the image. Where
+    the two sideways paths cross is when the racket turned the ball, wherever it was unseen.
+    """
+    def line(points: Sequence[BallSample]) -> tuple[float, float]:
+        mean_time = sum(point.time for point in points) / len(points)
+        mean_x = sum(point.x for point in points) / len(points)
+        spread = sum((point.time - mean_time) ** 2 for point in points)
+        slope = sum((point.time - mean_time) * (point.x - mean_x) for point in points) / spread
+        return slope, mean_x - slope * mean_time
+
+    incoming, outgoing = line(before), line(after)
+    turn = incoming[0] - outgoing[0]
+    if abs(turn) < GAP_STROKE_MIN_SIDEWAYS_TURN_PIXELS_PER_SECOND:
+        return None
+    time = (outgoing[1] - incoming[1]) / turn
+    if not before[-1].time <= time <= after[0].time:
+        return None
+    position = min(
+        range(before[-1].frame_position, after[0].frame_position + 1),
+        key=lambda index: abs(frames[index]["timestamp_seconds"] - time),
+    )
+    x = incoming[0] * time + incoming[1]
+    sample = BallSample(position, frames[position], seen.ball, frames[position]["timestamp_seconds"], x, seen.y)
+    # The crossing must still be at the player the ball left; otherwise the seen end stands.
+    hitter, seen_hitter = _find_hitter(sample), _find_hitter(seen)
+    if (
+        hitter is None
+        or seen_hitter is None
+        or side_of(_metric_position(hitter)[0]) != side_of(_metric_position(seen_hitter)[0])
+        or not _within_player_reach(sample)
+    ):
+        return None
+    return sample
+
+
+def _distance_to_hitter(sample: BallSample) -> float:
+    hitter = _find_hitter(sample)
+    return math.inf if hitter is None else _distance_to_box(sample, hitter["bbox"])
 
 
 def _struck_after_bounce(
@@ -1046,6 +1173,18 @@ def reversal_is_hit(
         >= TOSS_MIN_SPEED_RATIO * math.hypot(*fit_velocity(toss_before))
     ):
         return True
+    # A serve struck away from the camera leaves slowly on screen, so the speed test above can
+    # miss it, as can a low frame rate leaving too few samples in its window. A toss is told
+    # apart by where it falls: straight down above the server, then away to the other side.
+    # A ball landing next to the near player keeps coming towards them after the bounce.
+    if _falls_onto_server(trajectory, time, hitter) and _sent_towards_opponent(
+        [s for s in trajectory if time <= s.time <= time + REVERSAL_WINDOW_SECONDS],
+        cameras,
+        image_width,
+        time,
+        hitter,
+    ):
+        return True
 
     # Otherwise the reversal is fitted as a bounce. A slow ball leaves its depth loosely
     # constrained, so only a clear turn back along the court gives the racket away: the
@@ -1064,6 +1203,18 @@ def reversal_is_hit(
     # Read as a stroke by the near player instead, the ball has to leave towards the far side
     # at a stroke's pace; a ball drifting back towards the camera was not hit by them.
     return _sent_towards_opponent(after, cameras, image_width, time, hitter) is not False
+
+
+def _falls_onto_server(trajectory: Sequence[BallSample], time: float, hitter: dict) -> bool:
+    """Whether the ball came down above the hitter's head, within their width, as a toss does."""
+    left, top, right, _ = hitter["bbox"]
+    margin = (right - left) * TOSS_COLUMN_MARGIN_RATIO
+    falling = [s for s in trajectory if 0 < time - s.time <= REVERSAL_WINDOW_SECONDS]
+    return (
+        len(falling) >= KINK_MIN_WINDOW_SAMPLES
+        and all(left - margin <= s.x <= right + margin and s.y < top for s in falling)
+        and fit_velocity(falling)[1] > 0
+    )
 
 
 def _sent_towards_opponent(
@@ -1342,6 +1493,10 @@ def build_events(
     ]
     hit_samples = sorted(
         hit_samples + detect_vanishing_strokes(hit_frames, image_width, hit_samples, bounces),
+        key=lambda hit: hit.time,
+    )
+    hit_samples = sorted(
+        hit_samples + detect_gap_strokes(hit_frames, cameras, image_width, hit_samples),
         key=lambda hit: hit.time,
     )
     hits = classify_hits(frames, hit_samples, bounces, handedness)

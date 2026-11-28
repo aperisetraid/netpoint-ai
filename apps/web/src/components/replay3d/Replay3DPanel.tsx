@@ -6,6 +6,7 @@ import { buildFlightSegments, currentShotIndex, describeShots, NET_X, type ShotF
 import { formatSpeed, formatTime } from '../../lib/format.ts'
 import { findFrameAt } from '../../lib/frameLookup.ts'
 import { shotTypeLabels } from '../../lib/shotSummary.ts'
+import { useFullscreen } from '../../hooks/useFullscreen'
 import type { MatchTelemetry, PlayerSide } from '../../services/api'
 import type { PlayerNames } from '../ingest/PlayerNamesDialog'
 import { type CameraView, CourtReplayScene, type ReplayPlayer } from './courtScene'
@@ -57,25 +58,7 @@ export default function Replay3DPanel({
   const playback = useRef({ currentTime, isPlaying, getVideoTime })
   const [view, setView] = useState<CameraView>('tv')
   const [webglFailed, setWebglFailed] = useState(false)
-  // Browser fullscreen when it is available; otherwise (iPhone) the stage covers the window.
-  const [fullscreen, setFullscreen] = useState(false)
-  const [expanded, setExpanded] = useState(false)
-  const enlarged = fullscreen || expanded
-
-  useEffect(() => {
-    const sync = () => setFullscreen(document.fullscreenElement !== null && document.fullscreenElement === stageRef.current)
-    document.addEventListener('fullscreenchange', sync)
-    return () => document.removeEventListener('fullscreenchange', sync)
-  }, [])
-
-  useEffect(() => {
-    if (!expanded) return
-    const close = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setExpanded(false)
-    }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
-  }, [expanded])
+  const { enlarged, expanded, toggle: toggleSize } = useFullscreen(stageRef)
 
   useEffect(() => {
     playback.current = { currentTime, isPlaying, getVideoTime }
@@ -114,25 +97,6 @@ export default function Replay3DPanel({
       sceneRef.current = null
     }
   }, [telemetry, segments, hits, bounces])
-
-  async function toggleSize() {
-    const stage = stageRef.current
-    if (!stage) return
-    if (enlarged) {
-      if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined)
-      setExpanded(false)
-      return
-    }
-    if (document.fullscreenEnabled && stage.requestFullscreen) {
-      try {
-        await stage.requestFullscreen()
-        return
-      } catch {
-        // Refused (iframe, policy): fall back to covering the window.
-      }
-    }
-    setExpanded(true)
-  }
 
   function changeView(next: CameraView) {
     setView(next)

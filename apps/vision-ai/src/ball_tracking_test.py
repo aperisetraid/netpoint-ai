@@ -147,6 +147,20 @@ class BallTrackingTests(unittest.TestCase):
         track_ball(frames, [[candidate(*flight_path(index))] for index in range(30)], WIDTH)
         self.assertGreater(len(balls(frames)), 20)
 
+    def test_rejects_a_blob_at_a_players_feet_even_when_it_moves_on_its_own(self):
+        player = {"class": "player", "confidence": 0.9, "bbox": [570, 460, 630, 600], "x_meters": 23.0, "y_meters": 5.0}
+        # A shoe glinting in the sun slides along the feet of a player standing still.
+        frames = make_frames(25)
+        for frame in frames:
+            frame["detections"].append(dict(player))
+        track_ball(frames, [[candidate(560 + 4 * index, 598)] for index in range(25)], WIDTH)
+        self.assertEqual(balls(frames), {})
+
+        # The same motion away from any player is a ball rolling or flying along.
+        frames = make_frames(25)
+        track_ball(frames, [[candidate(560 + 4 * index, 598)] for index in range(25)], WIDTH)
+        self.assertGreater(len(balls(frames)), 20)
+
     def test_follows_the_serve_toss_rather_than_the_racket_hugging_the_server(self):
         server = {"class": "player", "confidence": 0.9, "bbox": [600, 300, 660, 420], "x_meters": 1.0, "y_meters": 4.0}
         frames = make_frames(30)

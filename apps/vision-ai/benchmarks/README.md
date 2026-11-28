@@ -44,3 +44,34 @@ python src/benchmark.py run "../assets/sinenr vs zverev.mp4" benchmarks/sinner_z
 ```
 
 Los `*.timing.json` que genera `run` dependen de la máquina y no se versionan.
+
+## Wimbledon (Eala – Swiatek, 25 fps, hierba): caso límite sin oro
+
+`Wimbledon.mp4` no tiene oro: el pipeline aún no lo resuelve entero y un oro solo puede recoger eventos
+reales. Sirve para medir, con estos eventos revisados fotograma a fotograma sobre el vídeo:
+
+| | Fotogramas reales | Pipeline |
+|---|---|---|
+| Golpes | 11 saque Eala · 38 · 74 · 106 · 147 · 177 · 208 · 266 · 294 · 308 volea Swiatek | los 10, a ±2 fotogramas y con su jugador |
+| Botes | 26 · 66 · 100 · 135 · 167 · 202 · 246 · 290 · 328 | 26 · 135 · 167 · 246 · 328, ninguno falso |
+
+Lo que lo hace difícil, y lo que se ajustó sin mover los tres oros:
+
+- **25 fps:** la mitad de muestras que los otros clips. El lanzamiento del saque se tomaba por un bote:
+  ahora se reconoce por dónde cae (en vertical, sobre el que saca) y adónde sale (al campo contrario).
+- **Zapatillas al sol sobre hierba:** los detectores de color y movimiento las confundían con la bola y
+  sus tramos ganaban a la bola real. Un tramo que pasa casi todo el tiempo a los pies de un jugador se
+  descarta, y un punto suelto a sus pies al final de un tramo se recorta.
+- **Bola perdida justo en el golpe:** muchos golpes ocurren sin verse la bola (tapada por el cuerpo o
+  fuera de los detectores). Un golpe así se reconoce porque la bola se pierde junto a un jugador y
+  reaparece alejándose de él; el instante es donde se cruzan sus trayectorias laterales antes y después.
+
+Límites que quedan, medidos:
+
+- **Botes 66 y 202:** la bola bota detrás del cuerpo de Eala y no aparece en ningún fotograma: no hay
+  nada que medir. Se prefiere no inventarlos.
+- **Botes 100 y 290:** se ven a medias (el último fotograma antes de perder la bola, o una subida lenta
+  pegada a la jugadora que el filtro de jugador descarta).
+- **Zurdos:** el tipo de golpe supone jugadores diestros, así que las derechas de Eala (zurda) salen como
+  revés. `build_events` admite la mano de cada jugador (`handedness`); con `{"near": "left"}` los 10
+  golpes salen con su tipo correcto.

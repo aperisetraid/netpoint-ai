@@ -68,7 +68,7 @@ export function AnalysisSidebar({
         </div>
         <div className="sidebar__scroll" role="tabpanel" id={`tabpanel-${tab}`} aria-labelledby={`tab-${tab}`}>
           {tab === 'frame' ? (
-            <FrameInspector analysis={analysis} frame={frame} isPlaying={isPlaying} />
+            <FrameInspector analysis={analysis} frame={frame} isPlaying={isPlaying} onSeek={onSeek} playerNames={playerNames} />
           ) : tab === '3d' ? (
             telemetry ? (
               <Suspense fallback={<p className="replay3d-loading">Cargando la vista 3D…</p>}>

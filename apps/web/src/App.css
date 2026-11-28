@@ -185,6 +185,68 @@
   margin-top: var(--s-3);
 }
 
+.frame-inspector__toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-2); }
+.frame-inspector__size { flex: none; margin-top: var(--s-3); }
+
+/* Full screen (browser API) or, where it is missing, covering the window: the frame as large as fits. */
+.frame-inspector__viewer:fullscreen,
+.frame-inspector__viewer.is-expanded {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  background: var(--surface);
+}
+
+.frame-inspector__viewer.is-expanded { position: fixed; inset: 0; z-index: 1000; }
+.frame-inspector__viewer:fullscreen { position: relative; }
+
+.frame-inspector__position {
+  align-self: center;
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  white-space: nowrap;
+}
+
+/* Previous / next frame: large round targets on either side of the enlarged frame. */
+.frame-inspector__step {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgb(238 242 246 / 0.25);
+  border-radius: 50%;
+  background: rgb(5 11 21 / 0.6);
+  color: #eef2f6;
+  cursor: pointer;
+  transform: translateY(-50%);
+  backdrop-filter: blur(6px);
+}
+
+.frame-inspector__step--previous { left: var(--s-4); }
+.frame-inspector__step--next { right: var(--s-4); }
+.frame-inspector__step:hover:not(:disabled) { background: rgb(5 11 21 / 0.85); }
+.frame-inspector__step:focus-visible { outline: 2px solid #5cc8f2; outline-offset: 2px; }
+.frame-inspector__step:disabled { opacity: 0.3; cursor: default; }
+.frame-inspector__viewer:fullscreen .frame-inspector__layers,
+.frame-inspector__viewer.is-expanded .frame-inspector__layers,
+.frame-inspector__viewer:fullscreen .frame-inspector__size,
+.frame-inspector__viewer.is-expanded .frame-inspector__size { margin-top: 0; }
+
+.frame-inspector__viewer:fullscreen .frame-inspector__image,
+.frame-inspector__viewer.is-expanded .frame-inspector__image,
+.frame-inspector__viewer:fullscreen .frame-inspector__empty,
+.frame-inspector__viewer.is-expanded .frame-inspector__empty {
+  align-self: center;
+  justify-self: center;
+  width: min(100%, calc((100dvh - 88px) * var(--frame-ratio, 1.7778)));
+  margin-top: 0;
+}
+
 .frame-inspector__layer {
   display: inline-flex;
   min-height: 30px;
