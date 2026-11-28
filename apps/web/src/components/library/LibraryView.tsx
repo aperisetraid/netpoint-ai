@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, FolderOpen, Plus, RefreshCw, Search } from 'lucide-react'
+import { AlertTriangle, FolderOpen, LoaderCircle, Plus, RefreshCw, Search } from 'lucide-react'
 
 import { type LibrarySort, filterLibrary, librarySortLabels } from '../../lib/libraryFilter.ts'
+import { SLOW_LOAD_MS, shouldKeepWaking, wakeRetryDelay } from '../../lib/wakeRetry.ts'
 import { ApiError, type LibraryMatch, listLibraryMatches } from '../../services/api'
 import { AppNav } from '../layout/AppNav'
 import type { Theme } from '../layout/ThemeToggle'
@@ -18,16 +19,23 @@ interface LibraryViewProps {
   allowNewAnalysis?: boolean
   /** Loads a stored analysis; rejects when it cannot be read. */
   onOpen: (matchId: string) => Promise<void>
+  /**
+   * The public demo sleeps on free hosting: wait for it to wake (retrying, with a note) instead of failing
+   * on the first request.
+   */
+  waitForWake?: boolean
 }
 
-type LoadState = 'loading' | 'ready' | 'error'
+type LoadState = 'loading' | 'waking' | 'ready' | 'error'
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback
 }
 
 /** Grid of the analyses already stored: pick one to load it without reprocessing the video. */
-export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen, allowNewAnalysis = true }: LibraryViewProps) {
+export function LibraryView({
+  theme, onThemeChange, onHome, onWorkspace, onOpen, allowNewAnalysis = true, waitForWake = false,
+}: LibraryViewProps) {
   const [matches, setMatches] = useState<LibraryMatch[]>([])
   const [state, setState] = useState<LoadState>('loading')
   const [loadError, setLoadError] = useState('')
@@ -40,20 +48,44 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen,
 
   useEffect(() => {
     let current = true
-    listLibraryMatches().then(
-      (result) => {
-        if (!current) return
-        setMatches(result)
-        setState('ready')
-      },
-      (error: unknown) => {
-        if (!current) return
-        setLoadError(errorText(error, 'No se pudo cargar la biblioteca.'))
-        setState('error')
-      },
-    )
-    return () => { current = false }
-  }, [reloadKey])
+    let retryTimer: number | undefined
+    const startedAt = Date.now()
+    // A sleeping service answers slowly too: after a few seconds, explain the wait.
+    const slowTimer = waitForWake
+      ? window.setTimeout(() => setState((state) => (state === 'loading' ? 'waking' : state)), SLOW_LOAD_MS)
+      : undefined
+
+    const load = (attempt: number) => {
+      listLibraryMatches().then(
+        (result) => {
+          if (!current) return
+          setMatches(result)
+          setState('ready')
+        },
+        (error: unknown) => {
+          if (!current) return
+          const status = error instanceof ApiError ? error.status : undefined
+          if (waitForWake && shouldKeepWaking(status, Date.now() - startedAt)) {
+            setState('waking')
+            retryTimer = window.setTimeout(() => load(attempt + 1), wakeRetryDelay(attempt))
+            return
+          }
+          setLoadError(
+            waitForWake
+              ? 'El servidor no ha respondido. Vuelve a intentarlo en un minuto.'
+              : errorText(error, 'No se pudo cargar la biblioteca.'),
+          )
+          setState('error')
+        },
+      )
+    }
+    load(0)
+    return () => {
+      current = false
+      window.clearTimeout(retryTimer)
+      window.clearTimeout(slowTimer)
+    }
+  }, [reloadKey, waitForWake])
 
   function retry() {
     setState('loading')
@@ -129,7 +161,20 @@ export function LibraryView({ theme, onThemeChange, onHome, onWorkspace, onOpen,
         </div>
       ) : null}
 
-      {state === 'loading' ? (
+      {state === 'waking' ? (
+        <div className="notice library-notice" role="status">
+          <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
+          <div>
+            <strong>Despertando el servidor…</strong>
+            <span>
+              La demo está en un alojamiento gratuito que se duerme tras un rato sin visitas. Tarda menos de un
+              minuto; la biblioteca aparecerá sola.
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {state === 'loading' || state === 'waking' ? (
         <ul className="library-grid" aria-busy="true" aria-label="Cargando partidos">
           {Array.from({ length: 6 }, (_, index) => (
             <li key={index} className="match-skeleton">

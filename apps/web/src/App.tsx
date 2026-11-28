@@ -113,6 +113,7 @@ function App() {
           onWorkspace={() => setView('analysis')}
           onOpen={handleOpenSaved}
           allowNewAnalysis={!demoMode}
+          waitForWake={demoMode}
         />
       ) : (
       <div className="workspace">

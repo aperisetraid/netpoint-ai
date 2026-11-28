@@ -43,3 +43,6 @@ apps/vision-ai/deploy-library/
 
 # Presentations (contain broadcast screenshots)
 *.pptx
+
+# Video presentation script (personal notes, not code)
+guion_video_presentacion.md
