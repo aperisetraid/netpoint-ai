@@ -1,0 +1,34 @@
+name: CodeQL
+
+# Static security analysis (OWASP-style flaws: injection, path traversal, unsafe input) of the
+# TypeScript and Python code, on every push to main, on pull requests and once a week.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          paths-ignore: |
+            **/node_modules/**
+            **/dist/**
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
